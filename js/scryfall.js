@@ -99,6 +99,13 @@ export async function rerollPrinting(oracleId, cmc) {
   return toCardModel(printing, cmc);
 }
 
+/** Random printing of a named card (e.g. Momir Vig for the avatar art). */
+export async function randomNamedPrinting(name) {
+  const query = encodeURIComponent(`!"${name}" game:paper`);
+  const printing = await fetchJson(`${API}/cards/random?q=${query}`);
+  return toCardModel(printing, printing.cmc ?? 0);
+}
+
 const BASIC_NAMES = { W: 'Plains', U: 'Island', B: 'Swamp', R: 'Mountain', G: 'Forest' };
 
 /** Random printing of a basic land (random art across all of Magic history). */

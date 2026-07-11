@@ -17,11 +17,13 @@ once you start a game from the ⚙ menu.
 - **New Momir game** — enables a **🎲 Summon** button per side, and
   optionally **landless play**: nobody brings lands, and each player draws
   from an identical tracked deck of basics (balanced across your chosen
-  colors, independently shuffled). Each side's deck pad can **draw, scry
-  1–3, mill, and shuffle**, with a per-player graveyard — it behaves exactly
-  like a real deck sitting there. Drawn lands **print automatically** (a
-  random printing's art each time), so only cards that actually hit the
-  table get printed; turn that off in settings if you use real land cards.
+  colors, independently shuffled). Each side's deck pad can **draw (1, 2,
+  3, or a 7-card opening hand), scry 1–3, mill, and shuffle**, with a
+  per-player graveyard whose lands can be **returned to play (reprinted)**
+  — it behaves exactly like a real deck sitting there. Drawn lands **print
+  automatically** (a random printing's art each time), so only cards that
+  actually hit the table get printed; turn that off in settings if you use
+  real land cards.
 - **Print two avatars to start** — one tap prints a *Momir Vig, Simic
   Visionary* reference card for each player, with the activation rules and
   your chosen starting life.
@@ -42,8 +44,14 @@ once you start a game from the ⚙ menu.
 Uses the BLE transport and Phomemo raster protocol vendored from
 [phomymo](https://github.com/transcriptionstream/phomymo)
 (see `js/vendor/phomymo/NOTICE.md`). Tested target: **Phomemo M250**
-(576 dots wide); any BLE Phomemo the phomymo project supports should work —
-the model is auto-detected from its Bluetooth name.
+(576 dots / 72mm print head); any BLE Phomemo the phomymo project supports
+should work — the model is auto-detected from its Bluetooth name.
+
+**Paper:** standard 2.25" (57mm) thermal receipt rolls work great and are
+the default paper-width setting — cards render at ~56mm, close to a real
+card's 63mm. The settings offer other widths up to the full 72mm head, and
+a "continuous paper" toggle (on by default) tells the printer not to hunt
+for die-cut label gaps. Content is centered on the head for narrower rolls.
 
 Requirements: Chrome or Edge (desktop or Android) — Web Bluetooth is not
 available on iOS/Safari/Firefox. The site must be served over HTTPS

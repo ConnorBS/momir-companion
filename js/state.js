@@ -29,6 +29,9 @@ export function defaultSettings() {
     autoPrint: true,   // auto-print summoned creatures when a printer is connected
     hideCounts: true,  // hide card counts on the summon pad (off to reveal them)
     printLands: true,  // print drawn lands (turn off when using real land cards)
+    paperWidthMm: 57,  // roll width; content renders at this and centers on the head
+    continuous: true,  // gapless media (receipt rolls) vs die-cut labels
+    avatarArt: true,   // put real Momir Vig card art on the avatar reference card
   };
 }
 

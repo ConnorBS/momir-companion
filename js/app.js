@@ -153,7 +153,7 @@ async function showReveal(card, { title, kind, autoPrint = false, copies = 1, ro
   box.innerHTML = '<p class="hint">Rendering…</p>';
   if (!$('dlg-summon').open) $('dlg-summon').showModal();
 
-  const width = await Printing.printerWidthDots();
+  const width = await Printing.printerWidthDots(settings);
   try {
     const canvas = await renderCard(card, width, { title });
     reveal.canvas = canvas;
@@ -289,12 +289,26 @@ function renderDeckPad() {
   const items = decks.graveyards[deckPlayer];
   $('deck-gy-title').textContent = `Graveyard (${items.length})`;
   gy.innerHTML = items.length ? '' : '<p class="sub">Empty</p>';
-  for (const item of [...items].reverse()) {
+  items.forEach((item, index) => {
     const row = document.createElement('div');
     row.className = 'gy-item';
-    row.innerHTML = `<span>${Decks.BASICS[item.c].name}</span><span class="via">${item.via}</span>`;
-    gy.appendChild(row);
-  }
+    row.innerHTML = `
+      <span>${Decks.BASICS[item.c].name}</span>
+      <span class="gy-side"><span class="via">${item.via}</span>
+      <button class="gy-get" title="Return to play (prints the land)">↩ 🖨</button></span>`;
+    row.querySelector('.gy-get').addEventListener('click', async () => {
+      items.splice(index, 1);
+      commit();
+      renderDeckPad();
+      if (!settings.printLands && !Printing.isPrinterConnected()) {
+        toast(`${Decks.BASICS[item.c].name} returned from graveyard`);
+        return;
+      }
+      $('dlg-deck').close();
+      await revealLand(item.c, 'returned from graveyard');
+    });
+    gy.prepend(row); // newest first
+  });
 }
 
 document.querySelectorAll('.deck-btn').forEach((btn) => {
@@ -307,30 +321,62 @@ document.querySelectorAll('.deck-btn').forEach((btn) => {
   });
 });
 
-$('btn-draw').addEventListener('click', async () => {
-  const color = Decks.draw(state.decks, deckPlayer);
-  if (!color) return;
-  commit();
-  renderDeckPad();
-  if (!settings.printLands) {
-    // Using real land cards — just report the draw
-    toast(`Drew ${Decks.BASICS[color].name}`);
-    return;
-  }
-  $('dlg-deck').close();
-  // Reveal + print flow reuses the summon dialog, flipped for the top player
+/** Open the (correctly flipped) reveal dialog and print one land. */
+async function revealLand(color, rollInfo = '') {
   summonFlip = deckPlayer === 1;
   flipWrap.classList.toggle('flip', summonFlip);
-  $('card-reveal').innerHTML = `<p class="hint">Drew ${Decks.BASICS[color].name} — fetching art…</p>`;
+  $('card-reveal').innerHTML = `<p class="hint">${Decks.BASICS[color].name} — fetching art…</p>`;
   setStage('card');
   if (!$('dlg-summon').open) $('dlg-summon').showModal();
   try {
     const card = await Scryfall.randomBasicLand(color);
-    await showReveal(card, { title: 'LAND', kind: 'land', autoPrint: true });
+    await showReveal(card, { title: 'LAND', kind: 'land', autoPrint: true, rollInfo });
   } catch (e) {
-    $('card-reveal').innerHTML = `<p class="warn">Drew ${Decks.BASICS[color].name}, but art failed: ${e.message}</p>`;
+    $('card-reveal').innerHTML = `<p class="warn">${Decks.BASICS[color].name} art failed: ${e.message}</p>`;
   }
-});
+}
+
+async function drawMany(n) {
+  const colors = [];
+  for (let i = 0; i < n; i++) {
+    const color = Decks.draw(state.decks, deckPlayer);
+    if (!color) break;
+    colors.push(color);
+  }
+  if (!colors.length) return;
+  commit();
+  renderDeckPad();
+  const names = colors.map((c) => Decks.BASICS[c].name);
+
+  if (!settings.printLands) {
+    // Using real land cards — just report the draw
+    toast(`Drew ${names.join(', ')}`, 4000);
+    return;
+  }
+  $('dlg-deck').close();
+
+  if (colors.length > 1 && !Printing.isPrinterConnected()) {
+    // No printer: one summary reveal beats flashing 7 previews past the user
+    summonFlip = deckPlayer === 1;
+    flipWrap.classList.toggle('flip', summonFlip);
+    setStage('card');
+    if (!$('dlg-summon').open) $('dlg-summon').showModal();
+    $('card-reveal').innerHTML =
+      `<p>Drew ${colors.length}:</p><p><b>${names.join('<br>')}</b></p>` +
+      '<p class="sub">Connect the printer (⚙) to auto-print drawn lands.</p>';
+    reveal = null;
+    return;
+  }
+
+  for (let i = 0; i < colors.length; i++) {
+    await revealLand(colors[i], colors.length > 1 ? `drawn ${i + 1} of ${colors.length}` : '');
+  }
+}
+
+$('btn-draw').addEventListener('click', () => drawMany(1));
+for (const n of [2, 3, 7]) {
+  $(`btn-draw-${n}`).addEventListener('click', () => drawMany(n));
+}
 
 for (const n of [1, 3]) {
   $(`btn-mill-${n}`).addEventListener('click', () => {
@@ -416,6 +462,7 @@ $('btn-settings').addEventListener('click', () => {
   $('btn-end-game').hidden = !state.momirActive;
   $('set-hide-counts').checked = settings.hideCounts;
   $('set-print-lands').checked = settings.printLands;
+  $('set-avatar-art').checked = settings.avatarArt !== false;
   $('no-bluetooth').hidden = Printing.isBluetoothAvailable();
   $('printer-block').hidden = !Printing.isBluetoothAvailable();
   syncPrinterPanel();
@@ -429,6 +476,11 @@ $('set-hide-counts').addEventListener('change', () => {
 
 $('set-print-lands').addEventListener('change', () => {
   settings.printLands = $('set-print-lands').checked;
+  State.saveSettings(settings);
+});
+
+$('set-avatar-art').addEventListener('change', () => {
+  settings.avatarArt = $('set-avatar-art').checked;
   State.saveSettings(settings);
 });
 
@@ -447,7 +499,17 @@ $('btn-reset-life').addEventListener('click', () => {
 
 $('btn-print-avatars').addEventListener('click', async () => {
   const connected = Printing.isPrinterConnected();
-  await showReveal(momirAvatarCard(state.startingLife), {
+  const avatar = momirAvatarCard(state.startingLife);
+  if (settings.avatarArt) {
+    // Borrow the art box from a random printing of the real Momir Vig card
+    try {
+      const vig = await Scryfall.randomNamedPrinting('Momir Vig, Simic Visionary');
+      Object.assign(avatar, { art: vig.art, artist: vig.artist, set: vig.set, cn: vig.cn });
+    } catch (e) {
+      console.warn('Momir art unavailable, printing text-only:', e.message);
+    }
+  }
+  await showReveal(avatar, {
     title: 'MOMIR BASIC — AVATAR',
     kind: 'avatar',
     autoPrint: connected,
@@ -466,6 +528,8 @@ $('btn-fullscreen').addEventListener('click', () => {
 // ---------------------------------------------------------------------------
 
 function syncPrinterPanel() {
+  $('set-paper-width').value = String(settings.paperWidthMm || 57);
+  $('set-continuous').checked = settings.continuous !== false;
   $('set-density').value = settings.density;
   $('density-val').textContent = settings.density;
   $('set-contrast').value = settings.contrast;
@@ -515,8 +579,18 @@ $('set-autoprint').addEventListener('change', () => {
   State.saveSettings(settings);
 });
 
+$('set-paper-width').addEventListener('change', () => {
+  settings.paperWidthMm = Number($('set-paper-width').value) || 57;
+  State.saveSettings(settings);
+});
+
+$('set-continuous').addEventListener('change', () => {
+  settings.continuous = $('set-continuous').checked;
+  State.saveSettings(settings);
+});
+
 $('btn-test-print').addEventListener('click', async () => {
-  const width = await Printing.printerWidthDots();
+  const width = await Printing.printerWidthDots(settings);
   const canvas = document.createElement('canvas');
   canvas.width = width;
   canvas.height = 120;
