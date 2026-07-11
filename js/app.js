@@ -1,27 +1,31 @@
 /**
- * Momir Companion — main UI wiring.
+ * Momir Companion — tabletop life tracker + on-demand card printer.
+ *
+ * The phone sits flat between two players. Each half tracks a life total
+ * (top half rotated 180°). The only Momir features are:
+ *   • print two avatar reference cards at the start of a game, and
+ *   • "how many lands did you tap?" → roll a random creature and print it.
+ * Players bring their own basic-land deck (or print lands from the pad).
  */
 
 import * as State from './state.js';
-import * as Game from './game.js';
 import * as Scryfall from './scryfall.js';
 import * as Printing from './printing.js';
 import { renderCard } from './receipt.js';
 import { canvasToRaster, rasterToCanvas } from './dither.js';
 
-let state = State.newGameState();
-let settings = State.loadSettings();
-const undoStack = [];
-const MAX_UNDO = 30;
-
 const $ = (id) => document.getElementById(id);
 const MAX_X = 16;
+
+let state = State.loadState() || State.newGameState();
+let settings = State.loadSettings();
+const bucketCounts = {};
 
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 
-function toast(msg, ms = 2600) {
+function toast(msg, ms = 2400) {
   const el = $('toast');
   el.textContent = msg;
   el.hidden = false;
@@ -29,223 +33,120 @@ function toast(msg, ms = 2600) {
   el._timer = setTimeout(() => { el.hidden = true; }, ms);
 }
 
-function snapshot() {
-  undoStack.push(JSON.stringify(state));
-  if (undoStack.length > MAX_UNDO) undoStack.shift();
-}
-
 function commit() {
   State.persist(state);
   render();
 }
 
-function closeDialogs() {
-  document.querySelectorAll('dialog[open]').forEach(d => d.close());
-}
-
-// ---------------------------------------------------------------------------
-// Rendering
-// ---------------------------------------------------------------------------
-
-const bucketCounts = {};
-
-async function loadBucketCounts() {
-  try {
-    const meta = await (await fetch('data/meta.json')).json();
-    Object.assign(bucketCounts, meta.counts);
-  } catch { /* meta is a nicety; buttons still work without it */ }
-  renderMomirButtons();
-}
-
-function renderMomirButtons() {
-  const container = $('momir-buttons');
-  container.innerHTML = '';
-  const mana = Game.manaAvailable(state);
-  for (let x = 0; x <= MAX_X; x++) {
-    const count = bucketCounts[x] ?? 0;
-    if (x > 12 && count === 0) continue; // skip empty high-CMC buckets
-    const btn = document.createElement('button');
-    btn.innerHTML = `${x}<small>${count || '—'}</small>`;
-    const affordable = x <= mana;
-    if (affordable && count > 0) btn.classList.add('affordable');
-    btn.disabled = count === 0 || state.hand.length === 0 ||
-      (settings.enforceMana && !affordable);
-    btn.addEventListener('click', () => startSummon(x));
-    container.appendChild(btn);
-  }
-}
-
-function landChip(color, label, onClick) {
-  const chip = document.createElement('button');
-  chip.className = `chip ${color}`;
-  chip.textContent = label;
-  if (onClick) chip.addEventListener('click', onClick);
-  return chip;
-}
-
 function render() {
-  $('setup').hidden = state.started;
-  $('game').hidden = !state.started;
   $('life-0').textContent = state.life[0];
   $('life-1').textContent = state.life[1];
-  $('turn-label').textContent = `Turn ${state.turn}`;
-  if (!state.started) return;
+}
 
-  $('mana-count').textContent = state.lands.length;
-  $('library-count').textContent = state.library.length;
-  $('hand-count').textContent = state.hand.length;
-  $('gy-count').textContent = state.graveyard.length;
-  $('btn-draw').disabled = state.library.length === 0;
+// The Momir avatar isn't a paper card, so build a text-only reference card.
+function momirAvatarCard(startingLife) {
+  return {
+    name: 'Momir Vig, Simic Visionary',
+    cmc: '',
+    manaCost: '',
+    typeLine: 'Vanguard — Avatar',
+    oracleText:
+      "{X}, Discard a card: Create a token that's a copy of a random " +
+      'creature card with mana value X. Activate only as a sorcery and ' +
+      `only once each turn.\n\nStarting life ${startingLife}. ` +
+      'Play from a deck of basic lands.',
+    power: null,
+    toughness: null,
+    set: '',
+    cn: '',
+    artist: '',
+    art: null,
+  };
+}
 
-  renderMomirButtons();
+// ---------------------------------------------------------------------------
+// Life tracking
+// ---------------------------------------------------------------------------
 
-  // Hand
-  const hand = $('hand-chips');
-  hand.innerHTML = '';
-  state.hand.forEach((color, i) => {
-    hand.appendChild(landChip(color, Game.BASICS[color].name, () => handAction(i)));
+document.querySelectorAll('.player .tap').forEach((btn) => {
+  btn.addEventListener('click', () => {
+    const p = Number(btn.dataset.player);
+    state.life[p] += Number(btn.dataset.delta);
+    commit();
   });
-  if (!state.hand.length) hand.innerHTML = '<span class="hint">Empty — no Momir activations possible</span>';
-
-  // Battlefield lands, grouped by color
-  const lands = $('land-chips');
-  lands.innerHTML = '';
-  const groups = {};
-  state.lands.forEach((color) => { groups[color] = (groups[color] || 0) + 1; });
-  for (const [color, n] of Object.entries(groups)) {
-    lands.appendChild(landChip(color, `${Game.BASICS[color].name} ×${n}`, () => landAction(color)));
-  }
-  if (!state.lands.length) lands.innerHTML = '<span class="hint">No lands yet — play one from hand</span>';
-
-  // Creatures
-  const list = $('creature-list');
-  list.innerHTML = '';
-  for (const creature of state.creatures) {
-    const row = document.createElement('div');
-    row.className = 'creature';
-    row.innerHTML = `
-      ${creature.art ? `<img src="${creature.art}" alt="" loading="lazy" crossorigin="anonymous">` : ''}
-      <span class="cname">${creature.name}
-        <span class="csub">${creature.typeLine ?? ''} · ${creature.set} #${creature.cn}</span></span>
-      <span class="cpt">${creature.power ?? '–'}/${creature.toughness ?? '–'}</span>`;
-    const thumb = row.querySelector('img');
-    if (thumb) {
-      thumb.addEventListener('error', () => {
-        // Recover from a cached non-CORS copy of the art (Scryfall vary: Origin)
-        if (!thumb.src.includes('cors=1')) {
-          thumb.src = `${creature.art}${creature.art.includes('?') ? '&' : '?'}cors=1`;
-        } else {
-          thumb.remove();
-        }
-      }, { once: false });
-    }
-    row.addEventListener('click', () => creatureAction(creature));
-    list.appendChild(row);
-  }
-}
-
-// ---------------------------------------------------------------------------
-// Setup screen
-// ---------------------------------------------------------------------------
-
-let setupDeck = { W: 12, U: 12, B: 12, R: 12, G: 12 };
-
-function renderSetup() {
-  const builder = $('deck-builder');
-  builder.innerHTML = '';
-  for (const [color, info] of Object.entries(Game.BASICS)) {
-    const row = document.createElement('div');
-    row.className = 'deck-row';
-    row.innerHTML = `
-      <div class="swatch" style="background: var(--${color})"></div>
-      <span class="lname">${info.name}</span>
-      <button data-d="-1">−</button>
-      <span class="cnt">${setupDeck[color]}</span>
-      <button data-d="1">+</button>`;
-    row.querySelectorAll('button').forEach(btn => btn.addEventListener('click', () => {
-      setupDeck[color] = Math.max(0, setupDeck[color] + Number(btn.dataset.d));
-      renderSetup();
-    }));
-    builder.appendChild(row);
-  }
-  $('deck-total').textContent = Game.deckSize(setupDeck);
-}
-
-$('btn-balance').addEventListener('click', () => {
-  const active = Object.keys(setupDeck).filter(c => setupDeck[c] > 0);
-  const colors = active.length ? active : Object.keys(setupDeck);
-  const per = Math.floor(60 / colors.length);
-  for (const c of Object.keys(setupDeck)) setupDeck[c] = colors.includes(c) ? per : 0;
-  let leftover = 60 - per * colors.length;
-  for (const c of colors) { if (leftover-- > 0) setupDeck[c] += 1; }
-  renderSetup();
-});
-
-$('btn-start').addEventListener('click', () => {
-  if (Game.deckSize(setupDeck) < 7) { toast('Deck needs at least 7 lands'); return; }
-  snapshot();
-  Game.startGame(state, setupDeck, Number($('start-life').value) || 24);
-  commit();
-  toast('Shuffled. Drew 7 lands. Good luck!');
 });
 
 // ---------------------------------------------------------------------------
-// Momir activation flow
+// Summon pad (per-player orientation)
 // ---------------------------------------------------------------------------
 
-let pendingX = null;
+const flipWrap = document.querySelector('#dlg-summon .flip-wrap');
+let summonFlip = false;
+let reveal = null; // { card, canvas, title, kind }
 
-function startSummon(x) {
-  if (state.hand.length === 0) { toast('No cards in hand to discard'); return; }
-  pendingX = x;
-  const chips = $('discard-chips');
-  chips.innerHTML = '';
-  state.hand.forEach((color, i) => {
-    chips.appendChild(landChip(color, Game.BASICS[color].name, () => resolveSummon(i)));
-  });
-  $('dlg-discard').showModal();
+function setStage(name) {
+  $('summon-stage').hidden = name !== 'summon';
+  $('card-stage').hidden = name !== 'card';
 }
 
-async function resolveSummon(discardIndex) {
-  const x = pendingX;
-  closeDialogs();
-  toast(`Summoning at X=${x}…`, 8000);
+function buildXButtons() {
+  const grid = $('x-buttons');
+  grid.innerHTML = '';
+  const haveMeta = Object.keys(bucketCounts).length > 0;
+  for (let x = 0; x <= MAX_X; x++) {
+    const count = bucketCounts[x];
+    if (haveMeta && !count) continue; // skip empty buckets (e.g. 14)
+    const btn = document.createElement('button');
+    btn.innerHTML = `${x}<small>${haveMeta ? count : '—'}</small>`;
+    btn.addEventListener('click', () => doSummon(x));
+    grid.appendChild(btn);
+  }
+}
+
+function openSummonPad(player) {
+  summonFlip = player === 1;
+  flipWrap.classList.toggle('flip', summonFlip);
+  setStage('summon');
+  buildXButtons();
+  if (!$('dlg-summon').open) $('dlg-summon').showModal();
+}
+
+document.querySelectorAll('.summon-btn').forEach((btn) => {
+  btn.addEventListener('click', () => openSummonPad(Number(btn.dataset.player)));
+});
+
+async function doSummon(x) {
+  setStage('card');
+  $('card-reveal').innerHTML = `<p class="hint">Summoning at X=${x}…</p>`;
   try {
     const roll = await Scryfall.rollCreature(x);
-    if (!roll) { toast(`No creatures exist at mana value ${x}`); return; }
-    snapshot();
-    const discardedColor = Game.discard(state, discardIndex, 'momir');
-    const creature = Game.summon(state, x, roll.card, discardedColor);
-    commit();
-    await showCard(creature, {
+    if (!roll) { toast(`No creatures exist at mana value ${x}`); openSummonPad(summonFlip ? 1 : 0); return; }
+    await showReveal(roll.card, {
       title: `MOMIR  X=${x}`,
+      kind: 'creature',
+      autoPrint: settings.autoPrint,
       rollInfo: `1 of ${bucketCounts[x] ?? '?'} names · art ${roll.card.set} #${roll.card.cn} (1 of ${roll.printCount} printings)`,
-      autoPrint: settings.autoPrintCreatures,
     });
   } catch (e) {
     console.error(e);
-    toast(`Summon failed: ${e.message}`);
+    $('card-reveal').innerHTML = `<p class="warn">Summon failed: ${e.message}</p>`;
   }
 }
 
-// ---------------------------------------------------------------------------
-// Card reveal + printing
-// ---------------------------------------------------------------------------
-
-let revealedCard = null;
-let revealedTitle = null;
-
-async function showCard(card, { title = null, rollInfo = '', autoPrint = false } = {}) {
-  revealedCard = card;
-  revealedTitle = title;
+/** Render a card into the reveal stage; optionally auto-print `copies`. */
+async function showReveal(card, { title, kind, autoPrint = false, copies = 1, rollInfo = '' }) {
+  reveal = { card, title, kind, canvas: null };
+  setStage('card');
+  $('btn-reroll-art').hidden = kind !== 'creature';
+  $('btn-summon-again').hidden = kind !== 'creature';
   const box = $('card-reveal');
   box.innerHTML = '<p class="hint">Rendering…</p>';
-  $('dlg-card').showModal();
+  if (!$('dlg-summon').open) $('dlg-summon').showModal();
 
   const width = await Printing.printerWidthDots();
   try {
     const canvas = await renderCard(card, width, { title });
-    // Preview exactly what the printer will produce
+    reveal.canvas = canvas;
     const preview = rasterToCanvas(canvasToRaster(canvas, { contrast: settings.contrast }));
     preview.style.width = '100%';
     box.innerHTML = '';
@@ -256,28 +157,29 @@ async function showCard(card, { title = null, rollInfo = '', autoPrint = false }
       info.textContent = rollInfo;
       box.appendChild(info);
     }
-    box._printCanvas = canvas;
   } catch (e) {
     box.innerHTML = `<p class="warn">Preview failed: ${e.message}</p>`;
+    return;
   }
 
-  if (autoPrint && Printing.isPrinterConnected()) printRevealed();
+  if (autoPrint && Printing.isPrinterConnected()) await printReveal(copies);
 }
 
-async function printRevealed() {
-  const box = $('card-reveal');
-  if (!box._printCanvas) return;
+async function printReveal(copies = 1) {
+  if (!reveal?.canvas) return;
   if (!Printing.isPrinterConnected()) {
-    toast('Printer not connected — open 🖨 to connect');
+    toast('Printer not connected — open ⚙ to connect');
     return;
   }
   const progress = $('print-progress');
   const bar = $('print-bar');
   progress.hidden = false;
-  bar.style.width = '0%';
   try {
-    await Printing.printCanvas(box._printCanvas, settings, p => { bar.style.width = `${p}%`; });
-    toast('Printed ✓');
+    for (let i = 0; i < copies; i++) {
+      bar.style.width = '0%';
+      await Printing.printCanvas(reveal.canvas, settings, (p) => { bar.style.width = `${p}%`; });
+    }
+    toast(copies > 1 ? `Printed ${copies} ✓` : 'Printed ✓');
   } catch (e) {
     console.error(e);
     toast(`Print failed: ${e.message}`);
@@ -286,210 +188,61 @@ async function printRevealed() {
   }
 }
 
-$('btn-print-card').addEventListener('click', printRevealed);
+$('btn-print-card').addEventListener('click', () => printReveal(1));
+
+$('btn-summon-again').addEventListener('click', () => openSummonPad(summonFlip ? 1 : 0));
 
 $('btn-reroll-art').addEventListener('click', async () => {
-  if (!revealedCard?.oracleId) return;
+  if (!reveal?.card?.oracleId) return;
   toast('Fetching another printing…');
   try {
-    const fresh = await Scryfall.rerollPrinting(revealedCard.oracleId, revealedCard.cmc);
+    const fresh = await Scryfall.rerollPrinting(reveal.card.oracleId, reveal.card.cmc);
     if (!fresh) return;
-    // Update the battlefield entry too, if this creature is on it
-    const onField = state.creatures.find(c => c.uid === revealedCard.uid);
-    if (onField) { Object.assign(onField, fresh); commit(); }
-    Object.assign(revealedCard, fresh);
-    await showCard(revealedCard, { title: revealedTitle });
+    await showReveal(fresh, { title: reveal.title, kind: 'creature' });
   } catch (e) {
     toast(`Reroll failed: ${e.message}`);
   }
 });
 
 // ---------------------------------------------------------------------------
-// Zone actions
+// Settings dialog
 // ---------------------------------------------------------------------------
 
-/** Generic action sheet: title + labeled buttons. */
-function actionSheet(title, actions) {
-  $('sheet-title').textContent = title;
-  const box = $('sheet-buttons');
-  box.innerHTML = '';
-  for (const action of actions) {
-    if (!action) continue;
-    const btn = document.createElement('button');
-    btn.textContent = action.label;
-    if (action.primary) btn.classList.add('primary');
-    btn.disabled = !!action.disabled;
-    btn.addEventListener('click', () => { $('dlg-sheet').close(); action.run(); });
-    box.appendChild(btn);
-  }
-  $('dlg-sheet').showModal();
-}
-
-function handAction(index) {
-  const color = state.hand[index];
-  const name = Game.BASICS[color].name;
-  actionSheet(`${name} (in hand)`, [
-    {
-      label: state.landPlayed ? '⛰ Play to battlefield (land already played!)' : '⛰ Play to battlefield',
-      primary: !state.landPlayed,
-      run: () => { snapshot(); Game.playLand(state, index); commit(); },
-    },
-    { label: '🗑 Discard', run: () => { snapshot(); Game.discard(state, index); commit(); } },
-    { label: '🖨 Print this land', run: () => printLand(color) },
-  ]);
-}
-
-function landAction(color) {
-  actionSheet(`${Game.BASICS[color].name} (battlefield)`, [
-    {
-      label: '🪦 To graveyard (destroyed/sacrificed)',
-      run: () => {
-        const index = state.lands.indexOf(color);
-        if (index < 0) return;
-        snapshot();
-        Game.landToGraveyard(state, index);
-        commit();
-      },
-    },
-    { label: '🖨 Print this land', run: () => printLand(color) },
-  ]);
-}
-
-function creatureAction(creature) {
-  actionSheet(`${creature.name} (${creature.power ?? '–'}/${creature.toughness ?? '–'})`, [
-    { label: '🪦 Dies (to graveyard)', primary: true, run: () => { snapshot(); Game.creatureDies(state, creature.uid); commit(); } },
-    { label: '✨ Exile', run: () => { snapshot(); Game.creatureExiled(state, creature.uid); commit(); } },
-    { label: '👁 View / print', run: () => showCard(creature, { title: `MOMIR  X=${creature.cmc}` }) },
-  ]);
-}
-
-async function printLand(color) {
-  toast(`Fetching random ${Game.BASICS[color].name} art…`);
-  try {
-    const card = await Scryfall.randomBasicLand(color);
-    await showCard(card, { title: 'LAND', autoPrint: settings.autoPrintLands });
-  } catch (e) {
-    toast(`Failed: ${e.message}`);
-  }
-}
-
-$('btn-draw').addEventListener('click', async () => {
-  snapshot();
-  const color = Game.draw(state);
-  commit();
-  if (!color) return;
-  toast(`Drew ${Game.BASICS[color].name}`);
-  if (settings.autoPrintLands && Printing.isPrinterConnected()) printLand(color);
+$('btn-settings').addEventListener('click', () => {
+  $('start-life').value = state.startingLife;
+  $('no-bluetooth').hidden = Printing.isBluetoothAvailable();
+  $('printer-block').hidden = !Printing.isBluetoothAvailable();
+  syncPrinterPanel();
+  $('dlg-settings').showModal();
 });
 
-$('btn-mill').addEventListener('click', () => {
-  const box = $('mill-buttons');
-  box.innerHTML = '';
-  for (const n of [1, 2, 3, 4, 5, 7, 10]) {
-    const btn = document.createElement('button');
-    btn.textContent = n;
-    btn.addEventListener('click', () => {
-      closeDialogs();
-      snapshot();
-      const milled = Game.mill(state, n);
-      commit();
-      toast(milled.length ? `Milled ${milled.length}: ${milled.map(c => Game.BASICS[c].symbol).join(' ')}` : 'Library is empty');
-    });
-    box.appendChild(btn);
-  }
-  $('dlg-mill').showModal();
-});
-
-// ---------------------------------------------------------------------------
-// Header
-// ---------------------------------------------------------------------------
-
-document.querySelectorAll('.life-btn').forEach(btn => {
-  btn.addEventListener('click', () => {
-    Game.changeLife(state, Number(btn.dataset.player), Number(btn.dataset.delta));
-    commit();
-  });
-});
-
-$('btn-next-turn').addEventListener('click', () => {
-  snapshot();
-  Game.nextTurn(state);
-  commit();
-});
-
-// ---------------------------------------------------------------------------
-// Panels: graveyard, log, menu
-// ---------------------------------------------------------------------------
-
-$('btn-graveyard').addEventListener('click', () => {
-  const gyList = $('gy-list');
-  gyList.innerHTML = state.graveyard.length ? '' : '<span class="hint">Empty</span>';
-  for (const item of [...state.graveyard].reverse()) {
-    const row = document.createElement('div');
-    row.className = 'gy-item';
-    row.innerHTML = item.t === 'land'
-      ? `<span>${Game.BASICS[item.c].name}</span><span class="via">${item.via}</span>`
-      : `<span>${item.name}</span><span class="via">creature · died</span>`;
-    gyList.appendChild(row);
-  }
-  const exList = $('exile-list');
-  exList.innerHTML = state.exile.length ? '' : '<span class="hint">Empty</span>';
-  for (const item of [...state.exile].reverse()) {
-    const row = document.createElement('div');
-    row.className = 'gy-item';
-    row.innerHTML = `<span>${item.name}</span><span class="via">exiled</span>`;
-    exList.appendChild(row);
-  }
-  $('dlg-graveyard').showModal();
-});
-
-$('btn-log').addEventListener('click', () => {
-  const list = $('log-list');
-  list.innerHTML = state.log.length ? '' : '<span class="hint">Nothing yet</span>';
-  for (const entry of [...state.log].reverse()) {
-    const row = document.createElement('div');
-    row.innerHTML = `<span class="lturn">T${entry.turn}</span> ${entry.msg}`;
-    list.appendChild(row);
-  }
-  $('dlg-log').showModal();
-});
-
-$('btn-menu').addEventListener('click', () => $('dlg-menu').showModal());
-
-$('btn-undo').addEventListener('click', () => {
-  if (!undoStack.length) { toast('Nothing to undo'); return; }
-  state = JSON.parse(undoStack.pop());
+$('start-life').addEventListener('change', () => {
+  const life = Math.max(1, Math.min(99, Number($('start-life').value) || 24));
+  state.startingLife = life;
+  $('start-life').value = life;
   State.persist(state);
-  render();
-  closeDialogs();
-  toast('Undone');
 });
 
-$('btn-share').addEventListener('click', async () => {
-  const url = await State.shareUrl(state);
-  try {
-    await navigator.clipboard.writeText(url);
-    toast('Backup URL copied — open it anywhere to restore this game');
-  } catch {
-    prompt('Copy this URL:', url);
-  }
+$('btn-reset-life').addEventListener('click', () => {
+  state.life = [state.startingLife, state.startingLife];
+  commit();
+  toast(`Both players reset to ${state.startingLife}`);
+});
+
+$('btn-print-avatars').addEventListener('click', async () => {
+  const connected = Printing.isPrinterConnected();
+  await showReveal(momirAvatarCard(state.startingLife), {
+    title: 'MOMIR BASIC — AVATAR',
+    kind: 'avatar',
+    autoPrint: connected,
+    copies: 2,
+  });
+  if (!connected) toast('Printer not connected — showing preview. Tap 🖨 Print per copy.');
 });
 
 $('btn-fullscreen').addEventListener('click', () => {
   if (document.fullscreenElement) document.exitFullscreen();
-  else document.documentElement.requestFullscreen();
-  closeDialogs();
-});
-
-$('btn-new-game').addEventListener('click', () => {
-  if (!confirm('Abandon the current game and start a new one?')) return;
-  snapshot();
-  state = State.newGameState();
-  State.clearSaved();
-  State.persist(state);
-  render();
-  renderSetup();
-  closeDialogs();
+  else document.documentElement.requestFullscreen?.();
 });
 
 // ---------------------------------------------------------------------------
@@ -503,24 +256,14 @@ function syncPrinterPanel() {
   $('contrast-val').textContent = Number(settings.contrast).toFixed(2);
   $('set-feed').value = settings.feed;
   $('feed-val').textContent = settings.feed;
-  $('set-autoprint-creatures').checked = settings.autoPrintCreatures;
-  $('set-autoprint-lands').checked = settings.autoPrintLands;
-  $('set-enforce-mana').checked = settings.enforceMana;
+  $('set-autoprint').checked = settings.autoPrint;
   const connected = Printing.isPrinterConnected();
   $('btn-connect').textContent = connected ? `Connected: ${Printing.printerName()}` : 'Connect Phomemo';
-  $('printer-status').textContent = connected ? Printing.printerName() : 'Printer';
   const info = Printing.printerInfo();
   $('printer-detail').textContent = connected
-    ? [info.battery != null && `battery ${info.battery}`, info.paper && `paper ${info.paper}`].filter(Boolean).join(' · ')
+    ? [info.battery != null && `battery ${info.battery}`, info.paper && `paper ${info.paper}`].filter(Boolean).join(' · ') || 'Connected.'
     : 'Not connected. Requires Chrome/Edge with Bluetooth.';
 }
-
-$('btn-printer').addEventListener('click', () => {
-  $('no-bluetooth').hidden = Printing.isBluetoothAvailable();
-  $('printer-panel').hidden = !Printing.isBluetoothAvailable();
-  syncPrinterPanel();
-  $('dlg-printer').showModal();
-});
 
 $('btn-connect').addEventListener('click', async () => {
   if (Printing.isPrinterConnected()) {
@@ -539,28 +282,22 @@ $('btn-connect').addEventListener('click', async () => {
   syncPrinterPanel();
 });
 
-for (const [id, key, num] of [
-  ['set-density', 'density', true],
-  ['set-contrast', 'contrast', true],
-  ['set-feed', 'feed', true],
+for (const [id, key] of [
+  ['set-density', 'density'],
+  ['set-contrast', 'contrast'],
+  ['set-feed', 'feed'],
 ]) {
   $(id).addEventListener('input', () => {
-    settings[key] = num ? Number($(id).value) : $(id).value;
+    settings[key] = Number($(id).value);
     State.saveSettings(settings);
     syncPrinterPanel();
   });
 }
-for (const [id, key] of [
-  ['set-autoprint-creatures', 'autoPrintCreatures'],
-  ['set-autoprint-lands', 'autoPrintLands'],
-  ['set-enforce-mana', 'enforceMana'],
-]) {
-  $(id).addEventListener('change', () => {
-    settings[key] = $(id).checked;
-    State.saveSettings(settings);
-    if (key === 'enforceMana') render();
-  });
-}
+
+$('set-autoprint').addEventListener('change', () => {
+  settings.autoPrint = $('set-autoprint').checked;
+  State.saveSettings(settings);
+});
 
 $('btn-test-print').addEventListener('click', async () => {
   const width = await Printing.printerWidthDots();
@@ -587,7 +324,7 @@ $('btn-test-print').addEventListener('click', async () => {
 // Dialog close buttons
 // ---------------------------------------------------------------------------
 
-document.querySelectorAll('.dlg-close').forEach(btn => {
+document.querySelectorAll('.dlg-close').forEach((btn) => {
   btn.addEventListener('click', () => btn.closest('dialog').close());
 });
 
@@ -595,10 +332,12 @@ document.querySelectorAll('.dlg-close').forEach(btn => {
 // Boot
 // ---------------------------------------------------------------------------
 
-(async function boot() {
-  const saved = await State.loadState();
-  if (saved) state = saved;
-  renderSetup();
-  render();
-  loadBucketCounts();
-})();
+async function loadBucketCounts() {
+  try {
+    const meta = await (await fetch('data/meta.json')).json();
+    Object.assign(bucketCounts, meta.counts);
+  } catch { /* buttons still work without counts */ }
+}
+
+render();
+loadBucketCounts();
