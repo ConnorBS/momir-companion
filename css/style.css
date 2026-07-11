@@ -102,6 +102,23 @@ button { font: inherit; cursor: pointer; touch-action: manipulation; }
 }
 .summon-btn:active { transform: scale(0.96); }
 
+/* land-deck pill (landless mode) — mirrors the summon button, opposite corner */
+.deck-btn {
+  position: absolute;
+  bottom: 14px;
+  left: 14px;
+  z-index: 2;
+  background: rgba(0, 0, 0, 0.28);
+  color: #fff;
+  border: 1px solid rgba(255, 255, 255, 0.35);
+  border-radius: 999px;
+  padding: 9px 16px;
+  font-weight: 700;
+  font-size: 0.95rem;
+  backdrop-filter: blur(2px);
+}
+.deck-btn:active { transform: scale(0.96); }
+
 /* ---------- center divider + settings gear ---------- */
 #divider {
   position: relative;
@@ -204,6 +221,29 @@ dialog > button, dialog .dlg-actions { margin-top: 12px; }
 
 #print-progress { height: 8px; background: var(--panel-2); border-radius: 4px; margin-top: 10px; overflow: hidden; }
 #print-bar { height: 100%; width: 0; background: var(--accent); transition: width 0.15s; }
+
+/* ---------- setup & deck dialogs ---------- */
+.setting-check {
+  display: flex; align-items: flex-start; gap: 10px;
+  font-size: 0.9rem; margin-top: 12px; cursor: pointer;
+}
+.setting-check input { accent-color: var(--accent); width: 18px; height: 18px; flex-shrink: 0; }
+
+.color-row { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 10px; }
+.color-row label {
+  display: flex; align-items: center; gap: 6px;
+  background: var(--panel-2); border: 1px solid #3a3a46;
+  border-radius: 999px; padding: 7px 12px; font-size: 0.85rem; cursor: pointer;
+}
+.color-row input { accent-color: var(--accent); }
+
+#dlg-deck h3 { margin-top: 14px; }
+.gy-list { display: flex; flex-direction: column; gap: 4px; max-height: 30dvh; overflow-y: auto; }
+.gy-list .gy-item {
+  background: var(--panel-2); border-radius: 6px; padding: 6px 10px;
+  display: flex; justify-content: space-between; font-size: 0.9rem;
+}
+.gy-list .via { color: var(--muted); font-size: 0.78rem; }
 
 /* ---------- toast ---------- */
 #toast {

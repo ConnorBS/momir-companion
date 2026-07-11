@@ -9,6 +9,7 @@
  */
 
 import * as State from './state.js';
+import * as Decks from './decks.js';
 import * as Scryfall from './scryfall.js';
 import * as Printing from './printing.js';
 import { renderCard } from './receipt.js';
@@ -41,6 +42,13 @@ function commit() {
 function render() {
   $('life-0').textContent = state.life[0];
   $('life-1').textContent = state.life[1];
+  // Momir controls appear only once a game has been set up
+  document.querySelectorAll('.summon-btn').forEach((btn) => { btn.hidden = !state.momirActive; });
+  document.querySelectorAll('.deck-btn').forEach((btn) => { btn.hidden = !state.momirActive || !state.decks; });
+  if (state.decks) {
+    $('deck-count-0').textContent = state.decks.libraries[0].length;
+    $('deck-count-1').textContent = state.decks.libraries[1].length;
+  }
 }
 
 // The Momir avatar isn't a paper card, so build a text-only reference card.
@@ -97,7 +105,9 @@ function buildXButtons() {
     const count = bucketCounts[x];
     if (haveMeta && !count) continue; // skip empty buckets (e.g. 14)
     const btn = document.createElement('button');
-    btn.innerHTML = `${x}<small>${haveMeta ? count : '—'}</small>`;
+    btn.innerHTML = settings.hideCounts
+      ? `${x}`
+      : `${x}<small>${haveMeta ? count : '—'}</small>`;
     btn.addEventListener('click', () => doSummon(x));
     grid.appendChild(btn);
   }
@@ -137,7 +147,7 @@ async function doSummon(x) {
 async function showReveal(card, { title, kind, autoPrint = false, copies = 1, rollInfo = '' }) {
   reveal = { card, title, kind, canvas: null };
   setStage('card');
-  $('btn-reroll-art').hidden = kind !== 'creature';
+  $('btn-reroll-art').hidden = kind !== 'creature' && kind !== 'land';
   $('btn-summon-again').hidden = kind !== 'creature';
   const box = $('card-reveal');
   box.innerHTML = '<p class="hint">Rendering…</p>';
@@ -198,11 +208,127 @@ $('btn-reroll-art').addEventListener('click', async () => {
   try {
     const fresh = await Scryfall.rerollPrinting(reveal.card.oracleId, reveal.card.cmc);
     if (!fresh) return;
-    await showReveal(fresh, { title: reveal.title, kind: 'creature' });
+    await showReveal(fresh, { title: reveal.title, kind: reveal.kind });
   } catch (e) {
     toast(`Reroll failed: ${e.message}`);
   }
 });
+
+// ---------------------------------------------------------------------------
+// Game setup (⚙ → New Momir game)
+// ---------------------------------------------------------------------------
+
+function renderSetupColors() {
+  const row = $('setup-colors');
+  if (row.childElementCount) return; // build once
+  for (const [color, info] of Object.entries(Decks.BASICS)) {
+    const label = document.createElement('label');
+    label.innerHTML = `<input type="checkbox" value="${color}" checked> ${info.name}`;
+    row.appendChild(label);
+  }
+}
+
+$('btn-new-game').addEventListener('click', () => {
+  $('dlg-settings').close();
+  renderSetupColors();
+  $('setup-life').value = state.startingLife;
+  $('setup-deck').hidden = !$('setup-landless').checked;
+  $('dlg-setup').showModal();
+});
+
+$('setup-landless').addEventListener('change', () => {
+  $('setup-deck').hidden = !$('setup-landless').checked;
+});
+
+$('btn-start-game').addEventListener('click', () => {
+  const life = Math.max(1, Math.min(99, Number($('setup-life').value) || 24));
+  state.startingLife = life;
+  state.life = [life, life];
+  state.momirActive = true;
+  state.decks = null;
+  if ($('setup-landless').checked) {
+    const colors = [...document.querySelectorAll('#setup-colors input:checked')].map(cb => cb.value);
+    if (!colors.length) { toast('Pick at least one land color'); return; }
+    const size = Math.max(7, Math.min(200, Number($('setup-deck-size').value) || 60));
+    state.decks = Decks.buildDecks(Decks.balancedConfig(colors, size));
+  }
+  commit();
+  $('dlg-setup').close();
+  toast(state.decks
+    ? `Game on — two ${state.decks.libraries[0].length}-land decks shuffled`
+    : `Game on — ${life} life each`);
+});
+
+$('btn-end-game').addEventListener('click', () => {
+  state.momirActive = false;
+  state.decks = null;
+  commit();
+  $('dlg-settings').close();
+  toast('Back to plain life tracker');
+});
+
+// ---------------------------------------------------------------------------
+// Land deck pad (landless mode)
+// ---------------------------------------------------------------------------
+
+let deckPlayer = 0;
+
+function renderDeckPad() {
+  const decks = state.decks;
+  if (!decks) return;
+  $('deck-remaining').textContent = decks.libraries[deckPlayer].length;
+  $('btn-draw').disabled = decks.libraries[deckPlayer].length === 0;
+  const gy = $('deck-gy');
+  const items = decks.graveyards[deckPlayer];
+  $('deck-gy-title').textContent = `Graveyard (${items.length})`;
+  gy.innerHTML = items.length ? '' : '<p class="sub">Empty</p>';
+  for (const item of [...items].reverse()) {
+    const row = document.createElement('div');
+    row.className = 'gy-item';
+    row.innerHTML = `<span>${Decks.BASICS[item.c].name}</span><span class="via">${item.via}</span>`;
+    gy.appendChild(row);
+  }
+}
+
+document.querySelectorAll('.deck-btn').forEach((btn) => {
+  btn.addEventListener('click', () => {
+    deckPlayer = Number(btn.dataset.player);
+    $('deck-flip').classList.toggle('flip', deckPlayer === 1);
+    renderDeckPad();
+    $('dlg-deck').showModal();
+  });
+});
+
+$('btn-draw').addEventListener('click', async () => {
+  const color = Decks.draw(state.decks, deckPlayer);
+  if (!color) return;
+  commit();
+  renderDeckPad();
+  $('dlg-deck').close();
+  // Reveal + print flow reuses the summon dialog, flipped for the top player
+  summonFlip = deckPlayer === 1;
+  flipWrap.classList.toggle('flip', summonFlip);
+  $('card-reveal').innerHTML = `<p class="hint">Drew ${Decks.BASICS[color].name} — fetching art…</p>`;
+  setStage('card');
+  if (!$('dlg-summon').open) $('dlg-summon').showModal();
+  try {
+    const card = await Scryfall.randomBasicLand(color);
+    await showReveal(card, { title: 'LAND', kind: 'land', autoPrint: settings.autoPrint });
+  } catch (e) {
+    $('card-reveal').innerHTML = `<p class="warn">Drew ${Decks.BASICS[color].name}, but art failed: ${e.message}</p>`;
+  }
+});
+
+for (const n of [1, 3, 5]) {
+  $(`btn-mill-${n}`).addEventListener('click', () => {
+    const milled = Decks.mill(state.decks, deckPlayer, n);
+    commit();
+    renderDeckPad();
+    toast(milled.length
+      ? `Milled ${milled.map(c => Decks.BASICS[c].name).join(', ')}`
+      : 'Library is empty');
+  });
+}
 
 // ---------------------------------------------------------------------------
 // Settings dialog
@@ -210,10 +336,17 @@ $('btn-reroll-art').addEventListener('click', async () => {
 
 $('btn-settings').addEventListener('click', () => {
   $('start-life').value = state.startingLife;
+  $('btn-end-game').hidden = !state.momirActive;
+  $('set-hide-counts').checked = settings.hideCounts;
   $('no-bluetooth').hidden = Printing.isBluetoothAvailable();
   $('printer-block').hidden = !Printing.isBluetoothAvailable();
   syncPrinterPanel();
   $('dlg-settings').showModal();
+});
+
+$('set-hide-counts').addEventListener('change', () => {
+  settings.hideCounts = $('set-hide-counts').checked;
+  State.saveSettings(settings);
 });
 
 $('start-life').addEventListener('change', () => {

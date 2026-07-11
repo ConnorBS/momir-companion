@@ -9,13 +9,15 @@
 const LS_KEY = 'momir_companion_game';
 const SETTINGS_KEY = 'momir_companion_settings';
 
-export const STATE_VERSION = 2;
+export const STATE_VERSION = 3;
 
 export function newGameState(startingLife = 24) {
   return {
     v: STATE_VERSION,
     startingLife,
     life: [startingLife, startingLife],
+    momirActive: false, // summon buttons appear only after "New Momir game"
+    decks: null,        // deck state from decks.js when playing without physical lands
   };
 }
 
@@ -25,6 +27,7 @@ export function defaultSettings() {
     feed: 40,
     contrast: 1.25,
     autoPrint: true,   // auto-print summoned creatures when a printer is connected
+    hideCounts: false, // hide card counts on the summon pad
   };
 }
 

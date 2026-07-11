@@ -20,7 +20,8 @@
       <span class="life" id="life-1">24</span>
       <span class="hint">tap left − / right +</span>
     </div>
-    <button class="summon-btn" data-player="1">🎲 Summon</button>
+    <button class="summon-btn" data-player="1" hidden>🎲 Summon</button>
+    <button class="deck-btn" data-player="1" hidden>🂠 <span id="deck-count-1">60</span></button>
   </section>
 
   <div id="divider">
@@ -34,17 +35,18 @@
       <span class="life" id="life-0">24</span>
       <span class="hint">tap left − / right +</span>
     </div>
-    <button class="summon-btn" data-player="0">🎲 Summon</button>
+    <button class="summon-btn" data-player="0" hidden>🎲 Summon</button>
+    <button class="deck-btn" data-player="0" hidden>🂠 <span id="deck-count-0">60</span></button>
   </section>
 </main>
 
 <!-- ============ DIALOGS ============ -->
 
-<!-- Summon pad: pick how many lands you tapped (= Momir's X). -->
+<!-- Summon pad: pick how much mana you're spending (= Momir's X). -->
 <dialog id="dlg-summon">
   <div class="flip-wrap">
     <div id="summon-stage">
-      <h2>How many lands did you tap?</h2>
+      <h2>How much mana are you spending?</h2>
       <p class="sub">Momir: pay <b>X</b>, discard a card → a random creature with mana value X.</p>
       <div id="x-buttons" class="x-grid"></div>
     </div>
@@ -66,15 +68,17 @@
   <h2>Settings</h2>
 
   <section class="setting-block">
-    <h3>Start of game</h3>
-    <button id="btn-print-avatars" class="primary big">🖨 Print 2 Momir avatars</button>
-    <p class="sub">One reference card per player. Bring your own basic-land deck, or print lands from the summon screen.</p>
+    <h3>Game</h3>
+    <button id="btn-new-game" class="primary big">🎲 New Momir game…</button>
+    <button id="btn-end-game" class="ghost full" hidden>✕ End game (back to plain life tracker)</button>
+    <button id="btn-print-avatars" class="ghost full">🖨 Print 2 Momir avatars</button>
     <div class="setup-row">
       <label>Starting life
         <input type="number" id="start-life" value="24" min="1" max="99">
       </label>
       <button id="btn-reset-life" class="ghost">Reset both</button>
     </div>
+    <label class="check setting-check"><input type="checkbox" id="set-hide-counts"> Hide card counts on the summon pad</label>
   </section>
 
   <section class="setting-block" id="printer-block">
@@ -106,6 +110,47 @@
   </section>
 
   <button class="ghost dlg-close full">Close</button>
+</dialog>
+
+<!-- New game setup: life + optional landless play with two tracked decks. -->
+<dialog id="dlg-setup">
+  <h2>New Momir game</h2>
+  <div class="setup-row">
+    <label>Starting life
+      <input type="number" id="setup-life" value="24" min="1" max="99">
+    </label>
+  </div>
+  <label class="check setting-check">
+    <input type="checkbox" id="setup-landless">
+    Play without physical lands — each player draws from an identical tracked deck
+  </label>
+  <div id="setup-deck" hidden>
+    <div class="setup-row">
+      <label>Lands per deck
+        <input type="number" id="setup-deck-size" value="60" min="7" max="200">
+      </label>
+    </div>
+    <div id="setup-colors" class="color-row"></div>
+    <p class="sub">Split evenly across the checked colors, shuffled separately per player.</p>
+  </div>
+  <button id="btn-start-game" class="primary big">Start</button>
+  <button class="ghost dlg-close full">Cancel</button>
+</dialog>
+
+<!-- Per-player land deck pad (flips for the top player). -->
+<dialog id="dlg-deck">
+  <div class="flip-wrap" id="deck-flip">
+    <h2>Land deck — <span id="deck-remaining">60</span> left</h2>
+    <button id="btn-draw" class="primary big">Draw a land</button>
+    <div class="dlg-actions">
+      <button id="btn-mill-1" class="ghost">Mill 1</button>
+      <button id="btn-mill-3" class="ghost">Mill 3</button>
+      <button id="btn-mill-5" class="ghost">Mill 5</button>
+    </div>
+    <h3 id="deck-gy-title">Graveyard</h3>
+    <div id="deck-gy" class="gy-list"></div>
+    <button class="ghost dlg-close full">Close</button>
+  </div>
 </dialog>
 
 <div id="toast" hidden></div>

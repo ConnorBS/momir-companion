@@ -8,20 +8,26 @@ no drivers, no server: it runs entirely as a static GitHub Pages site.
 
 ## How it plays
 
-You bring a physical basic-land deck (or print lands on demand). The app
-handles the two things that are annoying to do with cards on the table: the
-life totals and the random creature rolls.
+The app opens as a plain two-player life tracker; Momir features appear
+once you start a game from the ⚙ menu.
 
 - **Two-player life tracker** — a big number per side. Tap the left half of
   your side to subtract 1, the right half to add 1. A central ⚙ opens
   settings; **Reset both** snaps everyone back to the starting life.
+- **New Momir game** — enables a **🎲 Summon** button per side, and
+  optionally **landless play**: nobody brings lands, and each player draws
+  from an identical tracked deck of basics (balanced across your chosen
+  colors, independently shuffled). Draws and mills deplete it exactly like
+  a real deck, the graveyard is viewable per player, and drawn lands print
+  on demand — so only cards that actually hit the table get printed.
 - **Print two avatars to start** — one tap prints a *Momir Vig, Simic
   Visionary* reference card for each player, with the activation rules and
   your chosen starting life.
 - **Summon by tapping a number** — hit **🎲 Summon** on your side, then tell
-  it *how many lands you tapped* (that's Momir's **X**). It rolls a random
-  creature at that mana value and prints it. The summon pad and the card
-  preview rotate to face whoever tapped.
+  it *how much mana you're spending* (that's Momir's **X**). It rolls a
+  random creature at that mana value and prints it. The summon pad and the
+  card preview rotate to face whoever tapped. Card counts per X can be
+  hidden in settings.
 - **Momir rolls with correct odds** — every card *name* has an equal chance
   (selection uses Scryfall `oracle_cards` data, one entry per name). Once a
   name is chosen, the **art is a random printing from all of Magic history**.
