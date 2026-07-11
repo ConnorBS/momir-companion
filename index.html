@@ -2,169 +2,110 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-  <meta name="theme-color" content="#141419">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, user-scalable=no">
+  <meta name="theme-color" content="#111">
   <title>Momir Companion</title>
   <link rel="stylesheet" href="css/style.css">
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🎲</text></svg>">
 </head>
 <body>
 
-<header id="topbar">
-  <div class="life" id="life-you">
-    <button class="life-btn" data-player="0" data-delta="-1">−</button>
-    <div class="life-total"><span id="life-0">24</span><label>You</label></div>
-    <button class="life-btn" data-player="0" data-delta="1">+</button>
-  </div>
-  <div class="turn-box">
-    <div id="turn-label">Turn 1</div>
-    <button id="btn-next-turn">Next Turn ⟳</button>
-  </div>
-  <div class="life" id="life-opp">
-    <button class="life-btn" data-player="1" data-delta="-1">−</button>
-    <div class="life-total"><span id="life-1">24</span><label>Opp</label></div>
-    <button class="life-btn" data-player="1" data-delta="1">+</button>
-  </div>
-</header>
-
-<main>
-  <!-- ============ SETUP ============ -->
-  <section id="setup" hidden>
-    <h1>🎲 Momir Companion</h1>
-    <p class="sub">Momir Basic tracker &amp; on-demand thermal card printer</p>
-    <h2>Land deck</h2>
-    <div id="deck-builder"></div>
-    <div class="setup-row">
-      <span>Total: <b id="deck-total">60</b> lands</span>
-      <button id="btn-balance" class="ghost">Balance evenly</button>
+<!-- ============ TABLE: two-player life tracker ============ -->
+<main id="table">
+  <!-- Top player sits across the table; the whole half is rotated 180°. -->
+  <section class="player flip" id="player-1" data-player="1">
+    <button class="tap dec" data-player="1" data-delta="-1" aria-label="Player 2 minus one"></button>
+    <button class="tap inc" data-player="1" data-delta="1" aria-label="Player 2 plus one"></button>
+    <div class="readout">
+      <span class="life" id="life-1">24</span>
+      <span class="hint">tap left − / right +</span>
     </div>
-    <div class="setup-row">
-      <label>Starting life <input type="number" id="start-life" value="24" min="1" max="99"></label>
-    </div>
-    <button id="btn-start" class="primary big">Shuffle up &amp; start</button>
+    <button class="summon-btn" data-player="1">🎲 Summon</button>
   </section>
 
-  <!-- ============ GAME ============ -->
-  <section id="game" hidden>
-    <div class="panel" id="momir-panel">
-      <div class="panel-head">
-        <h2>Momir</h2>
-        <span class="hint"><b id="mana-count">0</b> lands on battlefield</span>
-      </div>
-      <div id="momir-buttons"></div>
-    </div>
+  <div id="divider">
+    <button id="btn-settings" aria-label="Settings">⚙</button>
+  </div>
 
-    <div class="panel" id="library-panel">
-      <div class="panel-head">
-        <h2>Library <span class="count" id="library-count">53</span></h2>
-        <div>
-          <button id="btn-draw" class="primary">Draw</button>
-          <button id="btn-mill" class="ghost">Mill…</button>
-        </div>
-      </div>
+  <section class="player" id="player-0" data-player="0">
+    <button class="tap dec" data-player="0" data-delta="-1" aria-label="Player 1 minus one"></button>
+    <button class="tap inc" data-player="0" data-delta="1" aria-label="Player 1 plus one"></button>
+    <div class="readout">
+      <span class="life" id="life-0">24</span>
+      <span class="hint">tap left − / right +</span>
     </div>
-
-    <div class="panel" id="hand-panel">
-      <div class="panel-head"><h2>Hand <span class="count" id="hand-count">7</span></h2></div>
-      <div id="hand-chips" class="chip-row"></div>
-    </div>
-
-    <div class="panel" id="battlefield-panel">
-      <div class="panel-head"><h2>Battlefield</h2></div>
-      <div id="land-chips" class="chip-row"></div>
-      <div id="creature-list"></div>
-    </div>
-
-    <nav id="bottom-nav">
-      <button id="btn-graveyard">🪦 Graveyard <span class="count" id="gy-count">0</span></button>
-      <button id="btn-log">📜 Log</button>
-      <button id="btn-printer">🖨 <span id="printer-status">Printer</span></button>
-      <button id="btn-menu">☰</button>
-    </nav>
+    <button class="summon-btn" data-player="0">🎲 Summon</button>
   </section>
 </main>
 
 <!-- ============ DIALOGS ============ -->
 
-<dialog id="dlg-discard">
-  <h2>Discard a card</h2>
-  <p class="sub">Momir's activation cost: <b>X</b> mana, discard a card.</p>
-  <div id="discard-chips" class="chip-row"></div>
-  <button class="ghost dlg-close">Cancel</button>
-</dialog>
-
-<dialog id="dlg-card">
-  <div id="card-reveal"></div>
-  <div class="dlg-actions">
-    <button id="btn-print-card" class="primary">🖨 Print</button>
-    <button id="btn-reroll-art" class="ghost">🎨 Other art</button>
-    <button class="ghost dlg-close">Close</button>
+<!-- Summon pad: pick how many lands you tapped (= Momir's X). -->
+<dialog id="dlg-summon">
+  <div class="flip-wrap">
+    <div id="summon-stage">
+      <h2>How many lands did you tap?</h2>
+      <p class="sub">Momir: pay <b>X</b>, discard a card → a random creature with mana value X.</p>
+      <div id="x-buttons" class="x-grid"></div>
+    </div>
+    <div id="card-stage" hidden>
+      <div id="card-reveal"></div>
+      <div class="dlg-actions">
+        <button id="btn-print-card" class="primary">🖨 Print</button>
+        <button id="btn-reroll-art" class="ghost">🎨 Other art</button>
+        <button id="btn-summon-again" class="ghost">🎲 Again</button>
+      </div>
+      <div id="print-progress" hidden><div id="print-bar"></div></div>
+    </div>
+    <button class="ghost dlg-close full">Close</button>
   </div>
-  <div id="print-progress" hidden><div id="print-bar"></div></div>
 </dialog>
 
-<dialog id="dlg-graveyard">
-  <h2>Graveyard</h2>
-  <div id="gy-list"></div>
-  <h2>Exile</h2>
-  <div id="exile-list"></div>
-  <button class="ghost dlg-close">Close</button>
-</dialog>
+<!-- Settings / printer / avatars. -->
+<dialog id="dlg-settings">
+  <h2>Settings</h2>
 
-<dialog id="dlg-log">
-  <h2>Game log</h2>
-  <div id="log-list"></div>
-  <button class="ghost dlg-close">Close</button>
-</dialog>
+  <section class="setting-block">
+    <h3>Start of game</h3>
+    <button id="btn-print-avatars" class="primary big">🖨 Print 2 Momir avatars</button>
+    <p class="sub">One reference card per player. Bring your own basic-land deck, or print lands from the summon screen.</p>
+    <div class="setup-row">
+      <label>Starting life
+        <input type="number" id="start-life" value="24" min="1" max="99">
+      </label>
+      <button id="btn-reset-life" class="ghost">Reset both</button>
+    </div>
+  </section>
 
-<dialog id="dlg-printer">
-  <h2>Printer</h2>
-  <div id="printer-panel">
+  <section class="setting-block" id="printer-block">
+    <h3>Printer</h3>
     <button id="btn-connect" class="primary">Connect Phomemo</button>
     <div id="printer-detail" class="sub"></div>
     <label>Density <input type="range" id="set-density" min="1" max="8" step="1"><span id="density-val"></span></label>
     <label>Art contrast <input type="range" id="set-contrast" min="0.8" max="2" step="0.05"><span id="contrast-val"></span></label>
     <label>Feed after print <input type="range" id="set-feed" min="0" max="120" step="8"><span id="feed-val"></span></label>
-    <label class="check"><input type="checkbox" id="set-autoprint-creatures"> Auto-print summoned creatures</label>
-    <label class="check"><input type="checkbox" id="set-autoprint-lands"> Auto-print drawn lands</label>
-    <label class="check"><input type="checkbox" id="set-enforce-mana"> Only allow X ≤ lands on battlefield</label>
+    <label class="check"><input type="checkbox" id="set-autoprint"> Auto-print summoned creatures</label>
     <button id="btn-test-print" class="ghost">Test print</button>
-  </div>
-  <p id="no-bluetooth" class="warn" hidden>
-    Web Bluetooth isn't available in this browser. Use Chrome or Edge on
-    desktop/Android. On iOS you can still play — print by screenshotting the
-    card and sharing it to the Phomemo app.
-  </p>
-  <button class="ghost dlg-close">Close</button>
-</dialog>
+    <p id="no-bluetooth" class="warn" hidden>
+      Web Bluetooth isn't available in this browser. Use Chrome or Edge on
+      desktop/Android. You can still summon and screenshot the card to share
+      to the Phomemo app.
+    </p>
+  </section>
 
-<dialog id="dlg-menu">
-  <h2>Menu</h2>
-  <button id="btn-undo" class="ghost">↩ Undo last action</button>
-  <button id="btn-share" class="ghost">🔗 Copy game-backup URL</button>
-  <button id="btn-fullscreen" class="ghost">⛶ Fullscreen</button>
-  <button id="btn-new-game" class="danger">🔄 New game</button>
-  <p class="sub" id="about">
-    Card data &amp; images from <a href="https://scryfall.com" target="_blank" rel="noopener">Scryfall</a>.
-    Momir filter rules ported from
-    <a href="https://github.com/MoritzHayden/momir-basic-printer" target="_blank" rel="noopener">momir-basic-printer</a>;
-    Phomemo printing vendored from
-    <a href="https://github.com/transcriptionstream/phomymo" target="_blank" rel="noopener">phomymo</a>.
-    Unofficial Fan Content permitted under the WotC Fan Content Policy.
-  </p>
-  <button class="ghost dlg-close">Close</button>
-</dialog>
+  <section class="setting-block">
+    <button id="btn-fullscreen" class="ghost">⛶ Fullscreen</button>
+    <p class="sub" id="about">
+      Card data &amp; images from <a href="https://scryfall.com" target="_blank" rel="noopener">Scryfall</a>.
+      Momir filter rules ported from
+      <a href="https://github.com/MoritzHayden/momir-basic-printer" target="_blank" rel="noopener">momir-basic-printer</a>;
+      Phomemo printing vendored from
+      <a href="https://github.com/transcriptionstream/phomymo" target="_blank" rel="noopener">phomymo</a>.
+      Unofficial Fan Content permitted under the WotC Fan Content Policy.
+    </p>
+  </section>
 
-<dialog id="dlg-sheet">
-  <h2 id="sheet-title"></h2>
-  <div id="sheet-buttons" class="sheet-buttons"></div>
-  <button class="ghost dlg-close">Cancel</button>
-</dialog>
-
-<dialog id="dlg-mill">
-  <h2>Mill how many?</h2>
-  <div class="chip-row" id="mill-buttons"></div>
-  <button class="ghost dlg-close">Cancel</button>
+  <button class="ghost dlg-close full">Close</button>
 </dialog>
 
 <div id="toast" hidden></div>

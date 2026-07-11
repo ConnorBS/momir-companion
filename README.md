@@ -1,29 +1,33 @@
 # 🎲 Momir Companion
 
-A fullscreen **Momir Basic** game tracker that prints your random creatures
-(and lands) on a **Phomemo thermal printer** — straight from the browser over
-Web Bluetooth. No app, no drivers, no server: it runs entirely as a static
-GitHub Pages site.
+A **tabletop life tracker** for **Momir Basic** that also prints random
+creatures on a **Phomemo thermal printer** — straight from the browser over
+Web Bluetooth. Lay your phone flat between two players; the top half is
+rotated 180° so both people read their own life total right-side-up. No app,
+no drivers, no server: it runs entirely as a static GitHub Pages site.
 
-## Why
+## How it plays
 
-Physical Momir Basic normally needs two 60-card stacks of basic lands and some
-way to reveal random creatures. This app replaces all of that:
+You bring a physical basic-land deck (or print lands on demand). The app
+handles the two things that are annoying to do with cards on the table: the
+life totals and the random creature rolls.
 
-- **Digital land deck** — build a balanced deck of basics, seeded-shuffled.
-  Draw, play, discard, and mill lands digitally; **print only the cards that
-  actually hit the table**, instead of sleeving 120 lands.
+- **Two-player life tracker** — a big number per side. Tap the left half of
+  your side to subtract 1, the right half to add 1. A central ⚙ opens
+  settings; **Reset both** snaps everyone back to the starting life.
+- **Print two avatars to start** — one tap prints a *Momir Vig, Simic
+  Visionary* reference card for each player, with the activation rules and
+  your chosen starting life.
+- **Summon by tapping a number** — hit **🎲 Summon** on your side, then tell
+  it *how many lands you tapped* (that's Momir's **X**). It rolls a random
+  creature at that mana value and prints it. The summon pad and the card
+  preview rotate to face whoever tapped.
 - **Momir rolls with correct odds** — every card *name* has an equal chance
   (selection uses Scryfall `oracle_cards` data, one entry per name). Once a
   name is chosen, the **art is a random printing from all of Magic history**.
 - **High-contrast B&W receipts** — the card prints with the real art box,
   auto-leveled and Floyd–Steinberg dithered for thermal paper. No QR codes.
-- **Full game tracking** — life totals (starts at 24, Momir's vanguard
-  bonus), turn counter, hand, battlefield, graveyard and exile viewers,
-  and a complete game log.
-- **Refresh-proof** — state autosaves to localStorage on every action *and*
-  is encoded into the URL hash, so a copied URL is a full game backup you can
-  reopen on any device.
+- **Refresh-proof** — life totals and settings autosave to localStorage.
 
 ## Printing
 
