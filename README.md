@@ -17,17 +17,19 @@ once you start a game from the ⚙ menu.
 - **New Momir game** — enables a **🎲 Summon** button per side, and
   optionally **landless play**: nobody brings lands, and each player draws
   from an identical tracked deck of basics (balanced across your chosen
-  colors, independently shuffled). Draws and mills deplete it exactly like
-  a real deck, the graveyard is viewable per player, and drawn lands print
-  on demand — so only cards that actually hit the table get printed.
+  colors, independently shuffled). Each side's deck pad can **draw, scry
+  1–3, mill, and shuffle**, with a per-player graveyard — it behaves exactly
+  like a real deck sitting there. Drawn lands **print automatically** (a
+  random printing's art each time), so only cards that actually hit the
+  table get printed; turn that off in settings if you use real land cards.
 - **Print two avatars to start** — one tap prints a *Momir Vig, Simic
   Visionary* reference card for each player, with the activation rules and
   your chosen starting life.
 - **Summon by tapping a number** — hit **🎲 Summon** on your side, then tell
   it *how much mana you're spending* (that's Momir's **X**). It rolls a
   random creature at that mana value and prints it. The summon pad and the
-  card preview rotate to face whoever tapped. Card counts per X can be
-  hidden in settings.
+  card preview rotate to face whoever tapped. Card counts per X are hidden
+  by default (reveal them in settings).
 - **Momir rolls with correct odds** — every card *name* has an equal chance
   (selection uses Scryfall `oracle_cards` data, one entry per name). Once a
   name is chosen, the **art is a random printing from all of Magic history**.

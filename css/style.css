@@ -245,6 +245,10 @@ dialog > button, dialog .dlg-actions { margin-top: 12px; }
 }
 .gy-list .via { color: var(--muted); font-size: 0.78rem; }
 
+.scry-item { align-items: center; }
+.scry-actions { display: flex; gap: 6px; }
+.scry-actions button { padding: 7px 11px; font-size: 0.85rem; }
+
 /* ---------- toast ---------- */
 #toast {
   position: fixed; left: 50%; top: 50%; transform: translate(-50%, -50%);

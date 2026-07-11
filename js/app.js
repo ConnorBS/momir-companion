@@ -273,11 +273,18 @@ $('btn-end-game').addEventListener('click', () => {
 
 let deckPlayer = 0;
 
+function setDeckStage(name) {
+  $('deck-stage').hidden = name !== 'deck';
+  $('scry-stage').hidden = name !== 'scry';
+}
+
 function renderDeckPad() {
   const decks = state.decks;
   if (!decks) return;
-  $('deck-remaining').textContent = decks.libraries[deckPlayer].length;
-  $('btn-draw').disabled = decks.libraries[deckPlayer].length === 0;
+  const remaining = decks.libraries[deckPlayer].length;
+  $('deck-remaining').textContent = remaining;
+  $('btn-draw').disabled = remaining === 0;
+  for (const n of [1, 2, 3]) $(`btn-scry-${n}`).disabled = remaining < n;
   const gy = $('deck-gy');
   const items = decks.graveyards[deckPlayer];
   $('deck-gy-title').textContent = `Graveyard (${items.length})`;
@@ -294,6 +301,7 @@ document.querySelectorAll('.deck-btn').forEach((btn) => {
   btn.addEventListener('click', () => {
     deckPlayer = Number(btn.dataset.player);
     $('deck-flip').classList.toggle('flip', deckPlayer === 1);
+    setDeckStage('deck');
     renderDeckPad();
     $('dlg-deck').showModal();
   });
@@ -304,6 +312,11 @@ $('btn-draw').addEventListener('click', async () => {
   if (!color) return;
   commit();
   renderDeckPad();
+  if (!settings.printLands) {
+    // Using real land cards — just report the draw
+    toast(`Drew ${Decks.BASICS[color].name}`);
+    return;
+  }
   $('dlg-deck').close();
   // Reveal + print flow reuses the summon dialog, flipped for the top player
   summonFlip = deckPlayer === 1;
@@ -313,13 +326,13 @@ $('btn-draw').addEventListener('click', async () => {
   if (!$('dlg-summon').open) $('dlg-summon').showModal();
   try {
     const card = await Scryfall.randomBasicLand(color);
-    await showReveal(card, { title: 'LAND', kind: 'land', autoPrint: settings.autoPrint });
+    await showReveal(card, { title: 'LAND', kind: 'land', autoPrint: true });
   } catch (e) {
     $('card-reveal').innerHTML = `<p class="warn">Drew ${Decks.BASICS[color].name}, but art failed: ${e.message}</p>`;
   }
 });
 
-for (const n of [1, 3, 5]) {
+for (const n of [1, 3]) {
   $(`btn-mill-${n}`).addEventListener('click', () => {
     const milled = Decks.mill(state.decks, deckPlayer, n);
     commit();
@@ -330,6 +343,70 @@ for (const n of [1, 3, 5]) {
   });
 }
 
+$('btn-shuffle').addEventListener('click', () => {
+  Decks.shuffleLibrary(state.decks, deckPlayer);
+  commit();
+  renderDeckPad();
+  toast('Library shuffled');
+});
+
+// --- Scry: reveal top N, send each to top (tap order = draw order) or bottom ---
+
+let scry = null; // { pending: [], topPile: [], bottomPile: [] }
+
+function renderScry() {
+  $('scry-title').textContent = `Scry ${scry.pending.length + scry.topPile.length + scry.bottomPile.length}`;
+  const list = $('scry-list');
+  list.innerHTML = '';
+  scry.pending.forEach((color, i) => {
+    const row = document.createElement('div');
+    row.className = 'gy-item scry-item';
+    row.innerHTML = `
+      <span>${Decks.BASICS[color].name}${i === 0 ? ' <span class="via">(top)</span>' : ''}</span>
+      <span class="scry-actions">
+        <button data-pile="top">↑ Top</button>
+        <button data-pile="bottom">↓ Bottom</button>
+      </span>`;
+    row.querySelectorAll('button').forEach((btn) => btn.addEventListener('click', () => {
+      scry.pending.splice(i, 1);
+      scry[btn.dataset.pile === 'top' ? 'topPile' : 'bottomPile'].push(color);
+      if (scry.pending.length === 0) finishScry();
+      else renderScry();
+    }));
+    list.appendChild(row);
+  });
+  const describe = (pile) => pile.map((c) => Decks.BASICS[c].name).join(', ');
+  $('scry-piles').textContent = [
+    scry.topPile.length ? `Top: ${describe(scry.topPile)}` : '',
+    scry.bottomPile.length ? `Bottom: ${describe(scry.bottomPile)}` : '',
+  ].filter(Boolean).join('  ·  ');
+}
+
+function finishScry() {
+  Decks.applyScry(state.decks, deckPlayer, scry.topPile, scry.bottomPile);
+  const summary = `Scry done — ${scry.topPile.length} on top, ${scry.bottomPile.length} to bottom`;
+  scry = null;
+  commit();
+  setDeckStage('deck');
+  renderDeckPad();
+  toast(summary);
+}
+
+for (const n of [1, 2, 3]) {
+  $(`btn-scry-${n}`).addEventListener('click', () => {
+    scry = { pending: Decks.peek(state.decks, deckPlayer, n), topPile: [], bottomPile: [] };
+    if (!scry.pending.length) { scry = null; return; }
+    setDeckStage('scry');
+    renderScry();
+  });
+}
+
+$('btn-scry-cancel').addEventListener('click', () => {
+  scry = null; // library untouched until finishScry
+  setDeckStage('deck');
+  renderDeckPad();
+});
+
 // ---------------------------------------------------------------------------
 // Settings dialog
 // ---------------------------------------------------------------------------
@@ -338,6 +415,7 @@ $('btn-settings').addEventListener('click', () => {
   $('start-life').value = state.startingLife;
   $('btn-end-game').hidden = !state.momirActive;
   $('set-hide-counts').checked = settings.hideCounts;
+  $('set-print-lands').checked = settings.printLands;
   $('no-bluetooth').hidden = Printing.isBluetoothAvailable();
   $('printer-block').hidden = !Printing.isBluetoothAvailable();
   syncPrinterPanel();
@@ -346,6 +424,11 @@ $('btn-settings').addEventListener('click', () => {
 
 $('set-hide-counts').addEventListener('change', () => {
   settings.hideCounts = $('set-hide-counts').checked;
+  State.saveSettings(settings);
+});
+
+$('set-print-lands').addEventListener('change', () => {
+  settings.printLands = $('set-print-lands').checked;
   State.saveSettings(settings);
 });
 

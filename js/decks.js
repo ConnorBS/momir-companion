@@ -83,3 +83,24 @@ export function mill(decks, p, n) {
 export function discard(decks, p, color) {
   decks.graveyards[p].push({ c: color, via: 'discard' });
 }
+
+/** Peek at the top n lands of player p's library (top first) without moving them. */
+export function peek(decks, p, n) {
+  return decks.libraries[p].slice(0, n);
+}
+
+/**
+ * Apply a scry: the top `topPile.length + bottomPile.length` cards are
+ * replaced by topPile (index 0 = new top) with bottomPile moved under
+ * the rest of the library.
+ */
+export function applyScry(decks, p, topPile, bottomPile) {
+  const taken = topPile.length + bottomPile.length;
+  const rest = decks.libraries[p].slice(taken);
+  decks.libraries[p] = [...topPile, ...rest, ...bottomPile];
+}
+
+/** Reshuffle the remaining library of player p (for shuffle effects). */
+export function shuffleLibrary(decks, p) {
+  decks.libraries[p] = shuffled(decks.libraries[p], (Math.random() * 0xffffffff) >>> 0);
+}

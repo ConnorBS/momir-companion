@@ -79,6 +79,7 @@
       <button id="btn-reset-life" class="ghost">Reset both</button>
     </div>
     <label class="check setting-check"><input type="checkbox" id="set-hide-counts"> Hide card counts on the summon pad</label>
+    <label class="check setting-check"><input type="checkbox" id="set-print-lands"> Print drawn lands (turn off if you use real land cards)</label>
   </section>
 
   <section class="setting-block" id="printer-block">
@@ -140,16 +141,30 @@
 <!-- Per-player land deck pad (flips for the top player). -->
 <dialog id="dlg-deck">
   <div class="flip-wrap" id="deck-flip">
-    <h2>Land deck — <span id="deck-remaining">60</span> left</h2>
-    <button id="btn-draw" class="primary big">Draw a land</button>
-    <div class="dlg-actions">
-      <button id="btn-mill-1" class="ghost">Mill 1</button>
-      <button id="btn-mill-3" class="ghost">Mill 3</button>
-      <button id="btn-mill-5" class="ghost">Mill 5</button>
+    <div id="deck-stage">
+      <h2>Land deck — <span id="deck-remaining">60</span> left</h2>
+      <button id="btn-draw" class="primary big">Draw a land</button>
+      <div class="dlg-actions">
+        <button id="btn-scry-1" class="ghost">Scry 1</button>
+        <button id="btn-scry-2" class="ghost">Scry 2</button>
+        <button id="btn-scry-3" class="ghost">Scry 3</button>
+      </div>
+      <div class="dlg-actions">
+        <button id="btn-mill-1" class="ghost">Mill 1</button>
+        <button id="btn-mill-3" class="ghost">Mill 3</button>
+        <button id="btn-shuffle" class="ghost">🔀 Shuffle</button>
+      </div>
+      <h3 id="deck-gy-title">Graveyard</h3>
+      <div id="deck-gy" class="gy-list"></div>
+      <button class="ghost dlg-close full">Close</button>
     </div>
-    <h3 id="deck-gy-title">Graveyard</h3>
-    <div id="deck-gy" class="gy-list"></div>
-    <button class="ghost dlg-close full">Close</button>
+    <div id="scry-stage" hidden>
+      <h2 id="scry-title">Scry</h2>
+      <p class="sub">Top of deck first. Send each card to the <b>top</b> (in the order you tap — first tap is drawn first) or the <b>bottom</b>.</p>
+      <div id="scry-list" class="gy-list"></div>
+      <p class="sub" id="scry-piles"></p>
+      <button id="btn-scry-cancel" class="ghost full">Cancel</button>
+    </div>
   </div>
 </dialog>
 

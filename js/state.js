@@ -27,7 +27,8 @@ export function defaultSettings() {
     feed: 40,
     contrast: 1.25,
     autoPrint: true,   // auto-print summoned creatures when a printer is connected
-    hideCounts: false, // hide card counts on the summon pad
+    hideCounts: true,  // hide card counts on the summon pad (off to reveal them)
+    printLands: true,  // print drawn lands (turn off when using real land cards)
   };
 }
 
