@@ -519,8 +519,29 @@ $('btn-print-avatars').addEventListener('click', async () => {
 });
 
 $('btn-fullscreen').addEventListener('click', () => {
+  // The open modal's backdrop would swallow every tap in fullscreen
+  $('dlg-settings').close();
   if (document.fullscreenElement) document.exitFullscreen();
   else document.documentElement.requestFullscreen?.();
+});
+
+// ---------------------------------------------------------------------------
+// Screen wake lock
+// ---------------------------------------------------------------------------
+// A tabletop tracker must not dim mid-game — and if the screen sleeps during
+// a 10-20s BLE transfer, Android suspends the page and the print stalls
+// halfway with the connection dropped.
+
+let wakeLock = null;
+
+async function keepAwake() {
+  try {
+    wakeLock = await navigator.wakeLock?.request('screen');
+  } catch { /* unsupported or denied — nothing to do */ }
+}
+
+document.addEventListener('visibilitychange', () => {
+  if (!document.hidden && (!wakeLock || wakeLock.released)) keepAwake();
 });
 
 // ---------------------------------------------------------------------------
@@ -663,3 +684,4 @@ async function loadBucketCounts() {
 
 render();
 loadBucketCounts();
+keepAwake();

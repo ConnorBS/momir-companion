@@ -37,6 +37,7 @@ export async function connectPrinter() {
   const transport = BLETransport.getShared();
   await transport.connect();
   try { await transport.queryAll(); } catch { /* status queries are best-effort */ }
+  startKeepalive();
   return {
     name: transport.getDeviceName(),
     description: getPrinterDescription(transport.getDeviceName()),
@@ -115,9 +116,37 @@ function padToHead(canvas, headDots, deviceName, offsetMm = 0) {
 function fastTransport(transport) {
   return {
     send: (data) => transport.send(data),
-    delay: (ms) => transport.delay(ms <= 20 ? Math.max(8, ms / 2) : ms),
+    delay: (ms) => transport.delay(ms <= 20 ? 6 : ms),
     waitForResponse: transport.waitForResponse?.bind(transport),
   };
+}
+
+// Phomemo printers auto-sleep and Android drops idle BLE links, which is why
+// the connection kept needing manual reconnects. A periodic battery query
+// keeps both ends awake — but never during a print, where injected query
+// bytes would corrupt the raster stream.
+let keepaliveTimer = null;
+let printing = false;
+
+function startKeepalive() {
+  clearInterval(keepaliveTimer);
+  keepaliveTimer = setInterval(async () => {
+    const transport = BLETransport.getShared();
+    if (printing || !transport.isConnected()) return;
+    try { await transport.query('battery'); } catch { /* best-effort */ }
+  }, 45000);
+}
+
+/** GATT-only reconnect to the already-paired device — never opens the picker. */
+async function tryReconnect(transport) {
+  if (transport.isConnected()) return true;
+  if (!transport.device) return false;
+  try {
+    await transport.retryWithBackoff(() => transport.connectGATT(), 2, 300);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 // Media-type command shared across Phomemo firmwares:
@@ -147,25 +176,32 @@ export function printCanvas(canvas, settings, onProgress = null) {
 async function doPrint(canvas, settings, onProgress) {
   await ensureDefinitions();
   const base = BLETransport.getShared();
-  if (!base.isConnected()) throw new Error('Printer not connected');
+  if (!base.isConnected() && !(await tryReconnect(base))) {
+    throw new Error('Printer not connected');
+  }
   const deviceName = base.getDeviceName();
   const transport = settings.fastTransfer ? fastTransport(base) : base;
 
-  await transport.send(settings.continuous !== false ? MEDIA_CONTINUOUS : MEDIA_GAPS);
-  await transport.delay(30);
+  printing = true;
+  try {
+    await transport.send(settings.continuous !== false ? MEDIA_CONTINUOUS : MEDIA_GAPS);
+    await transport.delay(30);
 
-  const head = getPrinterWidthBytes(deviceName) * 8;
-  const padded = padToHead(canvas, head, deviceName, settings.offsetMm || 0);
-  const raster = canvasToRaster(padded, rasterOpts(settings));
-  await print(transport, raster, {
-    isBLE: true,
-    deviceName,
-    density: settings.density,
-    feed: settings.feed,
-    onProgress,
-  });
+    const head = getPrinterWidthBytes(deviceName) * 8;
+    const padded = padToHead(canvas, head, deviceName, settings.offsetMm || 0);
+    const raster = canvasToRaster(padded, rasterOpts(settings));
+    await print(transport, raster, {
+      isBLE: true,
+      deviceName,
+      density: settings.density,
+      feed: settings.feed,
+      onProgress,
+    });
 
-  // Data is sent, but the head is still printing from its buffer — hold the
-  // queue for the estimated physical print time before the next job.
-  await base.delay(Math.min(10000, raster.heightLines * MS_PER_ROW));
+    // Data is sent, but the head is still printing from its buffer — hold the
+    // queue for the estimated physical print time before the next job.
+    await base.delay(Math.min(10000, raster.heightLines * MS_PER_ROW));
+  } finally {
+    printing = false;
+  }
 }
