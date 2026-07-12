@@ -22,6 +22,11 @@ jobs:
       url: ${{ steps.deployment.outputs.page_url }}
     steps:
       - uses: actions/checkout@v4
+      - name: Stamp build version
+        run: |
+          SHORT_SHA="${GITHUB_SHA::7}"
+          echo "export const VERSION = '${SHORT_SHA}';" > js/version.js
+          echo "{\"version\": \"${SHORT_SHA}\"}" > version.json
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
         with:
