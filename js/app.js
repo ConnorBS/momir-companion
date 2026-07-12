@@ -8,6 +8,7 @@
  * Players bring their own basic-land deck (or print lands from the pad).
  */
 
+import { VERSION } from './version.js';
 import * as State from './state.js';
 import * as Decks from './decks.js';
 import * as Scryfall from './scryfall.js';
@@ -947,3 +948,30 @@ async function loadBucketCounts() {
 render();
 loadBucketCounts();
 keepAwake();
+
+// ---------------------------------------------------------------------------
+// Version display + auto-update
+// ---------------------------------------------------------------------------
+// Mobile browsers restore this tab from cache without checking for new
+// deploys. version.json is fetched cache-bypassing; if it names a newer
+// build than the one running, reload once to pick it up.
+
+$('app-version').textContent = VERSION;
+console.log(`Momir Companion build ${VERSION}`);
+
+(async function checkForUpdate() {
+  try {
+    const resp = await fetch('version.json', { cache: 'no-store' });
+    if (!resp.ok) return;
+    const latest = (await resp.json()).version;
+    if (!latest || latest === VERSION || VERSION === 'dev') return;
+    if (sessionStorage.getItem('momir_updated_to') === latest) {
+      // Already reloaded for this build once — don't loop; just inform
+      toast(`Update ${latest} available — close and reopen to apply`, 5000);
+      return;
+    }
+    sessionStorage.setItem('momir_updated_to', latest);
+    toast(`Updating to build ${latest}…`, 3000);
+    setTimeout(() => location.reload(), 1200);
+  } catch { /* offline or local dev — fine */ }
+})();
