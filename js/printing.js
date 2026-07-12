@@ -154,6 +154,12 @@ const MS = {
 };
 const HEAT_TIMES = [40, 60, 80, 100, 120, 140, 160, 200];
 
+// Phomemo firmware silently discards a raster command that declares too many
+// rows (a 7-card batch in one command prints nothing at all), so tall images
+// are sent as consecutive ≤255-row blocks — the approach the reference
+// phomemo-tools driver uses. Blocks butt together with no visible seam.
+const BLOCK_ROWS = 255;
+
 async function printMSeriesAbortable(transport, raster, { density, feed, onProgress, signal }) {
   const { data, widthBytes, heightLines } = raster;
   await transport.send(MS.INIT);
@@ -162,17 +168,25 @@ async function printMSeriesAbortable(transport, raster, { density, feed, onProgr
   await transport.delay(30);
   await transport.send(MS.DENSITY(density));
   await transport.delay(50);
-  await transport.send(MS.HEADER(widthBytes, heightLines));
 
   const chunkSize = 128;
   const blank = new Uint8Array(chunkSize);
   let cancelled = false;
-  for (let i = 0; i < data.length; i += chunkSize) {
-    const size = Math.min(chunkSize, data.length - i);
-    if (!cancelled && signal?.aborted) cancelled = true;
-    await transport.send(cancelled ? blank.subarray(0, size) : data.slice(i, i + size));
-    await transport.delay(cancelled ? 8 : 20);
-    if (!cancelled && onProgress) onProgress(Math.round((i + size) / data.length * 100));
+  for (let row = 0; row < heightLines; row += BLOCK_ROWS) {
+    if (cancelled) break; // cancelled mid-block: skip the remaining blocks entirely
+    const rows = Math.min(BLOCK_ROWS, heightLines - row);
+    await transport.send(MS.HEADER(widthBytes, rows));
+    const start = row * widthBytes;
+    const end = start + rows * widthBytes;
+    for (let i = start; i < end; i += chunkSize) {
+      const size = Math.min(chunkSize, end - i);
+      if (!cancelled && signal?.aborted) cancelled = true;
+      // A started block must be completed (with blanks if cancelled) so the
+      // printer isn't left waiting on a half-delivered raster.
+      await transport.send(cancelled ? blank.subarray(0, size) : data.slice(i, i + size));
+      await transport.delay(cancelled ? 8 : 20);
+      if (!cancelled && onProgress) onProgress(Math.round((i + size) / data.length * 100));
+    }
   }
 
   await transport.delay(300);
