@@ -60,12 +60,12 @@ function drawLines(ctx, lines, x, y, lineHeight) {
  * @param {Object} opts - {showOracle: bool, title: string|null}
  * @returns {Promise<HTMLCanvasElement>}
  */
-export async function renderCard(card, widthDots, { showOracle = true, title = null } = {}) {
+export async function renderCard(card, widthDots, { showOracle = true, title = null, symbol = null } = {}) {
   const w = widthDots;
   const contentW = w - PAD * 2;
 
   let artImg = null;
-  if (card.art) {
+  if (card.art && !symbol) {
     try {
       artImg = await loadImage(card.art);
     } catch (e) {
@@ -73,6 +73,7 @@ export async function renderCard(card, widthDots, { showOracle = true, title = n
     }
   }
   const artH = artImg ? Math.round(contentW * (artImg.height / artImg.width)) : 0;
+  const symbolH = symbol ? 136 : 0; // compact circled-letter glyph instead of art
 
   // Measure pass on a throwaway context
   const measure = document.createElement('canvas').getContext('2d');
@@ -94,6 +95,7 @@ export async function renderCard(card, widthDots, { showOracle = true, title = n
   height += nameLines.length * 36 + 4;
   height += manaLine * 30;
   if (artImg) height += artH + 8;
+  if (symbol) height += symbolH + 8;
   height += typeLines.length * 28 + 4;
   height += oracleLines.length * 27;
   if (hasPT) height += 46;
@@ -131,6 +133,22 @@ export async function renderCard(card, widthDots, { showOracle = true, title = n
     ctx.lineWidth = 2;
     ctx.strokeRect(PAD, y, contentW, artH);
     y += artH + 8;
+  }
+
+  if (symbol) {
+    const cx = w / 2;
+    const cy = y + symbolH / 2;
+    ctx.strokeStyle = '#000';
+    ctx.lineWidth = 5;
+    ctx.beginPath();
+    ctx.arc(cx, cy, 56, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.font = 'bold 64px Georgia, serif';
+    const prevBaseline = ctx.textBaseline;
+    ctx.textBaseline = 'middle';
+    ctx.fillText(symbol, cx - ctx.measureText(symbol).width / 2, cy + 4);
+    ctx.textBaseline = prevBaseline;
+    y += symbolH + 8;
   }
 
   ctx.font = '24px Georgia, serif';

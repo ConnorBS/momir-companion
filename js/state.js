@@ -36,6 +36,7 @@ export function defaultSettings() {
     paperWidthMm: 57,  // roll width; content renders at this and centers on the head
     continuous: true,  // gapless media (receipt rolls) vs die-cut labels
     avatarArt: true,   // put real Momir Vig card art on the avatar reference card
+    landStyle: 'art',  // land prints: 'art' | 'symbol' (compact) | 'text' (smallest)
   };
 }
 

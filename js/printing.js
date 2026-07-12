@@ -16,7 +16,8 @@ import { canvasToRaster, rasterOpts } from './dither.js';
 const DOTS_PER_MM = 8; // 203 dpi
 // Rough physical print speed used to hold the queue until a job clears the
 // head; sending the next job's init early truncates the one still printing.
-const MS_PER_ROW = 5;
+// Dense art rows print slowly (the head needs heat time), so err generous.
+const MS_PER_ROW = 12;
 
 const DEFAULT_WIDTH_BYTES = 72; // M250: 72 bytes = 576 dots @ 203dpi
 
@@ -258,7 +259,7 @@ async function doPrint(canvas, settings, onProgress, signal) {
 
     // Data is sent, but the head is still printing from its buffer — hold the
     // queue for the estimated physical print time before the next job.
-    await base.delay(result === 'cancelled' ? 1500 : Math.min(10000, raster.heightLines * MS_PER_ROW));
+    await base.delay(result === 'cancelled' ? 1500 : Math.min(15000, raster.heightLines * MS_PER_ROW));
     return result;
   } finally {
     printing = false;

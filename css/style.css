@@ -233,6 +233,12 @@ dialog > button, dialog .dlg-actions { margin-top: 12px; }
 }
 .setting-check input { accent-color: var(--accent); width: 18px; height: 18px; flex-shrink: 0; }
 
+.setting-select { display: flex; align-items: center; gap: 10px; font-size: 0.9rem; margin-top: 12px; }
+.setting-select select {
+  flex: 1; font: inherit; background: var(--panel-2); color: var(--text);
+  border: 1px solid #3a3a46; border-radius: 6px; padding: 7px;
+}
+
 .color-row { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 10px; }
 .color-row label {
   display: flex; align-items: center; gap: 6px;

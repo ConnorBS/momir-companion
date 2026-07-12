@@ -144,36 +144,71 @@ async function doSummon(x) {
   }
 }
 
-/** Render a card into the reveal stage; optionally auto-print `copies`. */
-async function showReveal(card, { title, kind, autoPrint = false, copies = 1, rollInfo = '' }) {
-  reveal = { card, title, kind, canvas: null };
+/** Show a finished print canvas in the reveal stage; optionally auto-print. */
+async function presentCanvas(canvas, { card = null, title = null, kind, autoPrint = false, copies = 1, rollInfo = '' }) {
+  reveal = { card, title, kind, canvas };
   setStage('card');
   $('btn-reroll-art').hidden = kind !== 'creature' && kind !== 'land';
   $('btn-summon-again').hidden = kind !== 'creature';
   const box = $('card-reveal');
+  if (!$('dlg-summon').open) $('dlg-summon').showModal();
+  const preview = rasterToCanvas(canvasToRaster(canvas, rasterOpts(settings)));
+  preview.style.width = '100%';
+  box.innerHTML = '';
+  box.appendChild(preview);
+  if (rollInfo) {
+    const info = document.createElement('div');
+    info.className = 'roll-info';
+    info.textContent = rollInfo;
+    box.appendChild(info);
+  }
+  if (autoPrint && Printing.isPrinterConnected()) await printReveal(copies);
+}
+
+/** Render a card into the reveal stage; optionally auto-print `copies`. */
+async function showReveal(card, opts) {
+  setStage('card');
+  const box = $('card-reveal');
   box.innerHTML = '<p class="hint">Rendering…</p>';
   if (!$('dlg-summon').open) $('dlg-summon').showModal();
-
   const width = await Printing.printerWidthDots(settings);
+  let canvas;
   try {
-    const canvas = await renderCard(card, width, { title });
-    reveal.canvas = canvas;
-    const preview = rasterToCanvas(canvasToRaster(canvas, rasterOpts(settings)));
-    preview.style.width = '100%';
-    box.innerHTML = '';
-    box.appendChild(preview);
-    if (rollInfo) {
-      const info = document.createElement('div');
-      info.className = 'roll-info';
-      info.textContent = rollInfo;
-      box.appendChild(info);
-    }
+    canvas = await renderCard(card, width, { title: opts.title, symbol: opts.symbol || null });
   } catch (e) {
     box.innerHTML = `<p class="warn">Preview failed: ${e.message}</p>`;
     return;
   }
+  await presentCanvas(canvas, { ...opts, card });
+}
 
-  if (autoPrint && Printing.isPrinterConnected()) await printReveal(copies);
+/** Stack per-card canvases into one continuous print with dashed cut lines. */
+function stackCanvases(list, gap = 44) {
+  const width = Math.max(...list.map((c) => c.width));
+  const height = list.reduce((a, c) => a + c.height, 0) + gap * (list.length - 1);
+  const canvas = document.createElement('canvas');
+  canvas.width = width;
+  canvas.height = height;
+  const ctx = canvas.getContext('2d');
+  ctx.fillStyle = '#fff';
+  ctx.fillRect(0, 0, width, height);
+  let y = 0;
+  list.forEach((c, i) => {
+    ctx.drawImage(c, 0, y);
+    y += c.height;
+    if (i < list.length - 1) {
+      ctx.strokeStyle = '#000';
+      ctx.setLineDash([6, 10]);
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(0, y + gap / 2);
+      ctx.lineTo(width, y + gap / 2);
+      ctx.stroke();
+      ctx.setLineDash([]);
+      y += gap;
+    }
+  });
+  return canvas;
 }
 
 let printAbort = null; // aborts the in-flight/queued print when art is rerolled
@@ -352,19 +387,44 @@ document.querySelectorAll('.deck-btn').forEach((btn) => {
   });
 });
 
+/** Text-only land model — no network needed for symbol/text print styles. */
+function landModel(color) {
+  const name = Decks.BASICS[color].name;
+  return {
+    name,
+    cmc: '',
+    manaCost: '',
+    typeLine: `Basic Land — ${name}`,
+    oracleText: `{T}: Add {${color}}.`,
+    power: null,
+    toughness: null,
+    set: '',
+    cn: '',
+    artist: '',
+    art: null,
+  };
+}
+
+/** Resolve a land card model + render options per the land-style setting. */
+async function landCardFor(color) {
+  const style = settings.landStyle || 'art';
+  if (style === 'art') {
+    try {
+      return { card: await Scryfall.randomBasicLand(color), symbol: null };
+    } catch (e) {
+      console.warn('Land art unavailable, falling back to symbol:', e.message);
+      return { card: landModel(color), symbol: color };
+    }
+  }
+  return { card: landModel(color), symbol: style === 'symbol' ? color : null };
+}
+
 /** Open the (correctly flipped) reveal dialog and print one land. */
 async function revealLand(color, rollInfo = '') {
   summonFlip = deckPlayer === 1;
   flipWrap.classList.toggle('flip', summonFlip);
-  $('card-reveal').innerHTML = `<p class="hint">${Decks.BASICS[color].name} — fetching art…</p>`;
-  setStage('card');
-  if (!$('dlg-summon').open) $('dlg-summon').showModal();
-  try {
-    const card = await Scryfall.randomBasicLand(color);
-    await showReveal(card, { title: 'LAND', kind: 'land', autoPrint: true, rollInfo });
-  } catch (e) {
-    $('card-reveal').innerHTML = `<p class="warn">${Decks.BASICS[color].name} art failed: ${e.message}</p>`;
-  }
+  const { card, symbol } = await landCardFor(color);
+  await showReveal(card, { title: 'LAND', kind: 'land', symbol, autoPrint: true, rollInfo });
 }
 
 async function drawMany(n) {
@@ -399,8 +459,32 @@ async function drawMany(n) {
     return;
   }
 
-  for (let i = 0; i < colors.length; i++) {
-    await revealLand(colors[i], colors.length > 1 ? `drawn ${i + 1} of ${colors.length}` : '');
+  if (colors.length === 1) {
+    await revealLand(colors[0]);
+    return;
+  }
+
+  // Multi-draw: compose ONE continuous print with dashed cut lines between
+  // cards. A single job can't be truncated by the next one's init command.
+  summonFlip = deckPlayer === 1;
+  flipWrap.classList.toggle('flip', summonFlip);
+  setStage('card');
+  if (!$('dlg-summon').open) $('dlg-summon').showModal();
+  $('card-reveal').innerHTML = `<p class="hint">Preparing ${colors.length} lands…</p>`;
+  try {
+    const width = await Printing.printerWidthDots(settings);
+    const canvases = [];
+    for (const color of colors) {
+      const { card, symbol } = await landCardFor(color);
+      canvases.push(await renderCard(card, width, { title: 'LAND', symbol }));
+    }
+    await presentCanvas(stackCanvases(canvases), {
+      kind: 'batch',
+      autoPrint: true,
+      rollInfo: `${colors.length} lands drawn — dashed lines are cut marks`,
+    });
+  } catch (e) {
+    $('card-reveal').innerHTML = `<p class="warn">Draw print failed: ${e.message}</p>`;
   }
 }
 
@@ -494,6 +578,7 @@ $('btn-settings').addEventListener('click', () => {
   $('set-hide-counts').checked = settings.hideCounts;
   $('set-print-lands').checked = settings.printLands;
   $('set-avatar-art').checked = settings.avatarArt !== false;
+  $('set-land-style').value = settings.landStyle || 'art';
   $('no-bluetooth').hidden = Printing.isBluetoothAvailable();
   $('printer-block').hidden = !Printing.isBluetoothAvailable();
   syncPrinterPanel();
@@ -512,6 +597,11 @@ $('set-print-lands').addEventListener('change', () => {
 
 $('set-avatar-art').addEventListener('change', () => {
   settings.avatarArt = $('set-avatar-art').checked;
+  State.saveSettings(settings);
+});
+
+$('set-land-style').addEventListener('change', () => {
+  settings.landStyle = $('set-land-style').value;
   State.saveSettings(settings);
 });
 
