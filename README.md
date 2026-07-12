@@ -1,5 +1,8 @@
 # 🎲 Momir Companion
 
+**▶ Use it here: <https://connorbs.github.io/momir-companion/>**
+(open in Chrome or Edge — desktop or Android — for printing)
+
 A **tabletop life tracker** for **Momir Basic** that also prints random
 creatures on a **Phomemo thermal printer** — straight from the browser over
 Web Bluetooth. Lay your phone flat between two players; the top half is
