@@ -200,8 +200,9 @@ async function printMSeriesAbortable(transport, base, raster, { density, feed, o
     const end = start + rows * widthBytes;
 
     // Darkness-adaptive pacing: dark rows burn slowly, so the darker the
-    // block, the slower we feed it. A mostly-white block flows fast; a
-    // near-black one gets ~4x more time per chunk plus a drain pause.
+    // block, the slower we feed it. Pacing lives ONLY in the per-chunk
+    // delays — any idle pause between blocks makes the printer think the
+    // job ended and feed blank paper, cutting a white gap into the card.
     let blackBits = 0;
     for (let i = start; i < end; i++) blackBits += POPCOUNT[data[i]];
     const darkness = blackBits / ((end - start) * 8);
@@ -217,8 +218,6 @@ async function printMSeriesAbortable(transport, base, raster, { density, feed, o
       await sendChunk(transport, base, payload, reliable, cancelled ? 4 : chunkDelay);
       if (!cancelled && onProgress) onProgress(Math.round((i + size) / data.length * 100));
     }
-    // Let the head drain the block before the next one lands in the buffer
-    if (!cancelled) await base.delay(150 + Math.round(darkness * 900));
   }
 
   await transport.delay(300);
