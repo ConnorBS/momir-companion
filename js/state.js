@@ -38,6 +38,7 @@ export function defaultSettings() {
     continuous: true,  // gapless media (receipt rolls) vs die-cut labels
     avatarArt: true,   // put real Momir Vig card art on the avatar reference card
     landStyle: 'art',  // land prints: 'art' | 'symbol' (compact) | 'text' (smallest)
+    batchDraws: false, // multi-draws: one card at a time (default) or one strip
   };
 }
 

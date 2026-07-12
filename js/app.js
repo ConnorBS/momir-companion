@@ -145,7 +145,7 @@ async function doSummon(x) {
 }
 
 /** Show a finished print canvas in the reveal stage; optionally auto-print. */
-async function presentCanvas(canvas, { card = null, title = null, kind, autoPrint = false, copies = 1, rollInfo = '' }) {
+async function presentCanvas(canvas, { card = null, title = null, kind, autoPrint = false, copies = 1, rollInfo = '', grace = true }) {
   reveal = { card, title, kind, canvas };
   setStage('card');
   $('btn-reroll-art').hidden = kind !== 'creature' && kind !== 'land';
@@ -162,7 +162,9 @@ async function presentCanvas(canvas, { card = null, title = null, kind, autoPrin
     info.textContent = rollInfo;
     box.appendChild(info);
   }
-  if (autoPrint && Printing.isPrinterConnected()) await autoPrintWithGrace(copies);
+  if (autoPrint && Printing.isPrinterConnected()) {
+    await (grace ? autoPrintWithGrace(copies) : printReveal(copies));
+  }
 }
 
 /**
@@ -172,6 +174,10 @@ async function presentCanvas(canvas, { card = null, title = null, kind, autoPrin
  * still works immediately (the cancel fires first, then the button's click).
  */
 function autoPrintWithGrace(copies = 1) {
+  if (Printing.isPrintBusy()) {
+    toast('🖨 A print is still in progress — tap Print when it finishes', 3500);
+    return Promise.resolve();
+  }
   const delay = Math.max(0, Math.min(5, settings.autoPrintDelay ?? 2));
   if (delay === 0) return printReveal(copies);
 
@@ -259,6 +265,10 @@ async function printReveal(copies = 1) {
   if (!reveal?.canvas) return;
   if (!Printing.isPrinterConnected()) {
     toast('Printer not connected — open ⚙ to connect');
+    return;
+  }
+  if (Printing.isPrintBusy()) {
+    toast('🖨 A print is still in progress — wait for it to finish, then tap Print', 3500);
     return;
   }
   printAbort = new AbortController();
@@ -506,27 +516,46 @@ async function drawMany(n) {
     return;
   }
 
-  // Multi-draw: compose ONE continuous print with dashed cut lines between
-  // cards. A single job can't be truncated by the next one's init command.
+  if (settings.batchDraws) {
+    // Strip mode: ONE continuous print with dashed cut lines between cards.
+    summonFlip = deckPlayer === 1;
+    flipWrap.classList.toggle('flip', summonFlip);
+    setStage('card');
+    if (!$('dlg-summon').open) $('dlg-summon').showModal();
+    $('card-reveal').innerHTML = `<p class="hint">Preparing ${colors.length} lands…</p>`;
+    try {
+      const width = await Printing.printerWidthDots(settings);
+      const canvases = [];
+      for (const color of colors) {
+        const { card, symbol } = await landCardFor(color);
+        canvases.push(await renderCard(card, width, { title: 'LAND', symbol }));
+      }
+      await presentCanvas(stackCanvases(canvases), {
+        kind: 'batch',
+        autoPrint: true,
+        rollInfo: `${colors.length} lands drawn — dashed lines are cut marks`,
+      });
+    } catch (e) {
+      $('card-reveal').innerHTML = `<p class="warn">Draw print failed: ${e.message}</p>`;
+    }
+    return;
+  }
+
+  // One card at a time: each print waits for the printer's ready signal
+  // (or the timing estimate) before the next begins. No grace countdown —
+  // drawing several lands is already a deliberate action.
   summonFlip = deckPlayer === 1;
   flipWrap.classList.toggle('flip', summonFlip);
-  setStage('card');
-  if (!$('dlg-summon').open) $('dlg-summon').showModal();
-  $('card-reveal').innerHTML = `<p class="hint">Preparing ${colors.length} lands…</p>`;
-  try {
-    const width = await Printing.printerWidthDots(settings);
-    const canvases = [];
-    for (const color of colors) {
-      const { card, symbol } = await landCardFor(color);
-      canvases.push(await renderCard(card, width, { title: 'LAND', symbol }));
-    }
-    await presentCanvas(stackCanvases(canvases), {
-      kind: 'batch',
+  for (let i = 0; i < colors.length; i++) {
+    const { card, symbol } = await landCardFor(colors[i]);
+    await showReveal(card, {
+      title: 'LAND',
+      kind: 'land',
+      symbol,
       autoPrint: true,
-      rollInfo: `${colors.length} lands drawn — dashed lines are cut marks`,
+      grace: false,
+      rollInfo: `drawn ${i + 1} of ${colors.length}`,
     });
-  } catch (e) {
-    $('card-reveal').innerHTML = `<p class="warn">Draw print failed: ${e.message}</p>`;
   }
 }
 
@@ -621,6 +650,7 @@ $('btn-settings').addEventListener('click', () => {
   $('set-print-lands').checked = settings.printLands;
   $('set-avatar-art').checked = settings.avatarArt !== false;
   $('set-land-style').value = settings.landStyle || 'art';
+  $('set-batch-draws').checked = !!settings.batchDraws;
   $('no-bluetooth').hidden = Printing.isBluetoothAvailable();
   $('printer-block').hidden = !Printing.isBluetoothAvailable();
   syncPrinterPanel();
@@ -644,6 +674,11 @@ $('set-avatar-art').addEventListener('change', () => {
 
 $('set-land-style').addEventListener('change', () => {
   settings.landStyle = $('set-land-style').value;
+  State.saveSettings(settings);
+});
+
+$('set-batch-draws').addEventListener('change', () => {
+  settings.batchDraws = $('set-batch-draws').checked;
   State.saveSettings(settings);
 });
 

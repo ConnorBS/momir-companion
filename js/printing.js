@@ -195,6 +195,54 @@ async function printMSeriesAbortable(transport, raster, { density, feed, onProgr
   return cancelled ? 'cancelled' : 'done';
 }
 
+// --- printer "ready" detection -------------------------------------------
+// Phomemo printers emit print-status notifications (parsed by the vendored
+// BLE layer as field 'print'). After a job's data is sent we wait for one of
+// those before releasing the queue, falling back to the timed estimate if
+// the firmware stays silent. Signals arriving implausibly early are ignored
+// — some firmwares announce "printing started", which must not release the
+// queue while the head is still working.
+
+const readyWaiters = new Set();
+
+function ensureInfoHook(transport) {
+  if (transport._momirInfoHooked) return;
+  const previous = transport.onPrinterInfo;
+  transport.onPrinterInfo = (field, value, info) => {
+    if (previous) previous(field, value, info);
+    if (field === 'print') {
+      for (const waiter of readyWaiters) waiter(value);
+    }
+  };
+  transport._momirInfoHooked = true;
+}
+
+function waitForReady(transport, estimateMs) {
+  ensureInfoHook(transport);
+  const minWait = Math.max(1500, Math.round(estimateMs * 0.35));
+  const start = Date.now();
+  return new Promise((resolve) => {
+    let settled = false;
+    let timer;
+    const finish = (how) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      readyWaiters.delete(waiter);
+      console.log(`[print-ready] ${how} after ${Date.now() - start}ms (estimate ${estimateMs}ms)`);
+      resolve();
+    };
+    const waiter = () => {
+      if (Date.now() - start >= minWait) {
+        // small settle so the feed finishes before the next job's init
+        setTimeout(() => finish('printer signal'), 400);
+      }
+    };
+    readyWaiters.add(waiter);
+    timer = setTimeout(() => finish('estimate timeout'), estimateMs);
+  });
+}
+
 /** GATT-only reconnect to the already-paired device — never opens the picker. */
 async function tryReconnect(transport) {
   if (transport.isConnected()) return true;
@@ -216,6 +264,12 @@ const MEDIA_GAPS = new Uint8Array([0x1f, 0x11, 0x0a]);
 // still working through the first one's buffer (its ESC @ init would
 // truncate the print mid-card).
 let printQueue = Promise.resolve();
+let activeJobs = 0;
+
+/** True while a job is transferring, physically printing, or queued. */
+export function isPrintBusy() {
+  return activeJobs > 0;
+}
 
 /**
  * Dither a composed receipt canvas and send it to the connected printer.
@@ -226,7 +280,10 @@ let printQueue = Promise.resolve();
  * @param {Function} onProgress - percent callback
  */
 export function printCanvas(canvas, settings, onProgress = null, signal = null) {
-  const job = printQueue.then(() => doPrint(canvas, settings, onProgress, signal));
+  activeJobs++;
+  const job = printQueue
+    .then(() => doPrint(canvas, settings, onProgress, signal))
+    .finally(() => { activeJobs--; });
   printQueue = job.catch(() => { /* a failed job must not block the queue */ });
   return job;
 }
@@ -272,8 +329,12 @@ async function doPrint(canvas, settings, onProgress, signal) {
     }
 
     // Data is sent, but the head is still printing from its buffer — hold the
-    // queue for the estimated physical print time before the next job.
-    await base.delay(result === 'cancelled' ? 1500 : Math.min(15000, raster.heightLines * MS_PER_ROW));
+    // queue until the printer signals it's done (or the estimate elapses).
+    if (result === 'cancelled') {
+      await base.delay(1500);
+    } else {
+      await waitForReady(base, Math.min(15000, raster.heightLines * MS_PER_ROW));
+    }
     return result;
   } finally {
     printing = false;
