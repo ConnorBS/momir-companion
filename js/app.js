@@ -96,6 +96,7 @@ function setStage(name) {
   $('summon-stage').hidden = name !== 'summon';
   $('card-stage').hidden = name !== 'card';
   $('art-stage').hidden = name !== 'art';
+  $('history-stage').hidden = name !== 'history';
 }
 
 function buildXButtons() {
@@ -132,6 +133,7 @@ async function doSummon(x) {
   try {
     const roll = await Scryfall.rollCreature(x);
     if (!roll) { toast(`No creatures exist at mana value ${x}`); openSummonPad(summonFlip ? 1 : 0); return; }
+    recordSummon(roll.card, x);
     await showReveal(roll.card, {
       title: `MOMIR  X=${x}`,
       kind: 'creature',
@@ -287,7 +289,7 @@ async function printReveal(copies = 1) {
     toast(copies > 1 ? `Printed ${copies} ✓` : 'Printed ✓');
   } catch (e) {
     console.error(e);
-    toast(`Print failed: ${e.message}`);
+    toast(`Print failed: ${e.message} — if the printer shows "Waiting for data", use 🔧 Unstick in ⚙`, 5000);
   } finally {
     progress.hidden = true;
   }
@@ -296,6 +298,38 @@ async function printReveal(copies = 1) {
 $('btn-print-card').addEventListener('click', () => printReveal(1));
 
 $('btn-summon-again').addEventListener('click', () => openSummonPad(summonFlip ? 1 : 0));
+
+// ---------------------------------------------------------------------------
+// Summon history — every roll is kept so any card can be reprinted later
+// ---------------------------------------------------------------------------
+
+function recordSummon(card, x) {
+  state.history = state.history || [];
+  state.history.unshift({ ...card, x });
+  if (state.history.length > 40) state.history.length = 40;
+  State.persist(state);
+}
+
+$('btn-history').addEventListener('click', () => {
+  const list = $('history-list');
+  const entries = state.history || [];
+  list.innerHTML = entries.length ? '' : '<p class="sub">No summons yet this game.</p>';
+  entries.forEach((entry) => {
+    const row = document.createElement('div');
+    row.className = 'gy-item history-item';
+    row.innerHTML = `
+      <span>${entry.name}
+        <span class="via">${entry.power ?? '–'}/${entry.toughness ?? '–'} · X=${entry.x} · ${entry.set}</span></span>
+      <button class="gy-get">🖨</button>`;
+    row.querySelector('.gy-get').addEventListener('click', () => {
+      showReveal(entry, { title: `MOMIR  X=${entry.x}`, kind: 'creature' });
+    });
+    list.appendChild(row);
+  });
+  setStage('history');
+});
+
+$('btn-history-back').addEventListener('click', () => setStage('summon'));
 
 // "Other art": stop any pending auto-print and open the artwork gallery —
 // the printing you tap is exactly the version that renders and prints.
@@ -321,6 +355,12 @@ $('btn-reroll-art').addEventListener('click', async () => {
         }
       });
       cell.addEventListener('click', () => {
+        // Keep the history entry in sync so a reprint uses the chosen art
+        const entry = (state.history || []).find((h) => h.oracleId === model.oracleId);
+        if (entry) {
+          Object.assign(entry, model, { x: entry.x });
+          State.persist(state);
+        }
         showReveal(model, { title: reveal.title, kind: reveal.kind });
       });
       grid.appendChild(cell);
@@ -364,6 +404,7 @@ $('btn-start-game').addEventListener('click', () => {
   state.life = [life, life];
   state.momirActive = true;
   state.decks = null;
+  state.history = [];
   if ($('setup-landless').checked) {
     const colors = [...document.querySelectorAll('#setup-colors input:checked')].map(cb => cb.value);
     if (!colors.length) { toast('Pick at least one land color'); return; }
@@ -762,6 +803,7 @@ function syncPrinterPanel() {
   $('set-feed').value = settings.feed;
   $('feed-val').textContent = settings.feed;
   $('set-fast').checked = !!settings.fastTransfer;
+  $('set-reliable').checked = settings.reliable !== false;
   $('set-autoprint').checked = settings.autoPrint;
   $('set-autoprint-delay').value = settings.autoPrintDelay ?? 2;
   $('autoprint-delay-val').textContent = `${settings.autoPrintDelay ?? 2}s`;
@@ -813,6 +855,24 @@ $('set-dither').addEventListener('change', () => {
 $('set-fast').addEventListener('change', () => {
   settings.fastTransfer = $('set-fast').checked;
   State.saveSettings(settings);
+});
+
+$('set-reliable').addEventListener('change', () => {
+  settings.reliable = $('set-reliable').checked;
+  State.saveSettings(settings);
+});
+
+$('btn-unstick').addEventListener('click', async () => {
+  $('btn-unstick').disabled = true;
+  toast('Flushing the printer… (~5s)', 6000);
+  try {
+    await Printing.unstickPrinter();
+    toast('Printer flushed — try printing again');
+  } catch (e) {
+    toast(`Unstick failed: ${e.message}`);
+  } finally {
+    $('btn-unstick').disabled = false;
+  }
 });
 
 $('set-autoprint').addEventListener('change', () => {

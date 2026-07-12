@@ -160,7 +160,23 @@ const HEAT_TIMES = [40, 60, 80, 100, 120, 140, 160, 200];
 // phomemo-tools driver uses. Blocks butt together with no visible seam.
 const BLOCK_ROWS = 255;
 
-async function printMSeriesAbortable(transport, raster, { density, feed, onProgress, signal }) {
+/**
+ * Send one raster chunk. Acknowledged mode uses write-WITH-response: the
+ * printer confirms every chunk, so nothing can be silently dropped — a lost
+ * chunk is what desyncs the raster stream and produces "wrapped around"
+ * prints with the printer stuck on "Waiting for data". The ACK round-trip
+ * also self-paces the link, so no artificial delay is needed.
+ */
+async function sendChunk(transport, base, payload, reliable, cancelled) {
+  if (reliable && base.writeChar?.properties?.write) {
+    await base.writeChar.writeValue(payload.buffer);
+  } else {
+    await transport.send(payload);
+    await transport.delay(cancelled ? 8 : 20);
+  }
+}
+
+async function printMSeriesAbortable(transport, base, raster, { density, feed, onProgress, signal, reliable }) {
   const { data, widthBytes, heightLines } = raster;
   await transport.send(MS.INIT);
   await transport.delay(100);
@@ -183,8 +199,8 @@ async function printMSeriesAbortable(transport, raster, { density, feed, onProgr
       if (!cancelled && signal?.aborted) cancelled = true;
       // A started block must be completed (with blanks if cancelled) so the
       // printer isn't left waiting on a half-delivered raster.
-      await transport.send(cancelled ? blank.subarray(0, size) : data.slice(i, i + size));
-      await transport.delay(cancelled ? 8 : 20);
+      const payload = cancelled ? blank.slice(0, size) : data.slice(i, i + size);
+      await sendChunk(transport, base, payload, reliable, cancelled);
       if (!cancelled && onProgress) onProgress(Math.round((i + size) / data.length * 100));
     }
   }
@@ -193,6 +209,38 @@ async function printMSeriesAbortable(transport, raster, { density, feed, onProgr
   await transport.send(MS.FEED(feed));
   await transport.delay(500);
   return cancelled ? 'cancelled' : 'done';
+}
+
+/**
+ * Recovery for a printer stuck on "Waiting for data" (a raster block that
+ * never finished): feed more than a full block of blank bytes to satisfy the
+ * pending read (NUL bytes are ignored if the printer is actually idle),
+ * then re-init and feed.
+ */
+export async function unstickPrinter() {
+  const base = BLETransport.getShared();
+  if (!base.isConnected() && !(await tryReconnect(base))) {
+    throw new Error('Printer not connected');
+  }
+  printing = true;
+  try {
+    const blank = new Uint8Array(128);
+    const total = 24 * 1024; // > one full 255-row block at 72 bytes/row
+    for (let i = 0; i < total; i += blank.length) {
+      if (base.writeChar?.properties?.write) {
+        await base.writeChar.writeValue(blank.buffer);
+      } else {
+        await base.send(blank);
+        await base.delay(8);
+      }
+    }
+    await base.send(MS.INIT);
+    await base.delay(100);
+    await base.send(MS.FEED(64));
+    await base.delay(300);
+  } finally {
+    printing = false;
+  }
 }
 
 // --- printer "ready" detection -------------------------------------------
@@ -312,11 +360,12 @@ async function doPrint(canvas, settings, onProgress, signal) {
     const protocol = getDetectedDefinition(deviceName)?.protocol ?? 'm-series';
     let result = 'done';
     if (protocol === 'm-series') {
-      result = await printMSeriesAbortable(transport, raster, {
+      result = await printMSeriesAbortable(transport, base, raster, {
         density: settings.density,
         feed: settings.feed,
         onProgress,
         signal,
+        reliable: settings.reliable !== false,
       });
     } else {
       await print(transport, raster, {

@@ -289,6 +289,9 @@ dialog > button, dialog .dlg-actions { margin-top: 12px; }
 .art-cell span { display: block; font-size: 0.75rem; color: var(--muted); padding: 5px 4px; }
 
 .scry-item { align-items: center; }
+.history-item { align-items: center; }
+.history-item .gy-get { padding: 7px 12px; }
+#history-list { max-height: 55dvh; }
 .scry-actions { display: flex; gap: 6px; }
 .scry-actions button { padding: 7px 11px; font-size: 0.85rem; }
 

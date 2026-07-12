@@ -49,6 +49,12 @@
       <h2>How much mana are you spending?</h2>
       <p class="sub">Momir: pay <b>X</b>, discard a card → a random creature with mana value X.</p>
       <div id="x-buttons" class="x-grid"></div>
+      <button id="btn-history" class="ghost full">🕘 Reprint a previous summon</button>
+    </div>
+    <div id="history-stage" hidden>
+      <h2>Summon history</h2>
+      <div id="history-list" class="gy-list"></div>
+      <button id="btn-history-back" class="ghost full">← Back</button>
     </div>
     <div id="card-stage" hidden>
       <div id="card-reveal"></div>
@@ -125,7 +131,9 @@
     <label>Brightness <input type="range" id="set-brightness" min="0.7" max="1.6" step="0.05"><span id="brightness-val"></span></label>
     <label>Art contrast <input type="range" id="set-contrast" min="0.8" max="2" step="0.05"><span id="contrast-val"></span></label>
     <label>Feed after print <input type="range" id="set-feed" min="0" max="120" step="8"><span id="feed-val"></span></label>
-    <label class="check"><input type="checkbox" id="set-fast"> Fast transfer (uncheck if prints garble)</label>
+    <label class="check"><input type="checkbox" id="set-reliable"> Acknowledged transfer (prevents corrupted/wrapped prints)</label>
+    <label class="check"><input type="checkbox" id="set-fast"> Fast transfer (only applies when acknowledged is off)</label>
+    <button id="btn-unstick" class="ghost">🔧 Unstick printer (if stuck on "Waiting for data")</button>
     <label class="check"><input type="checkbox" id="set-autoprint"> Auto-print summoned creatures</label>
     <label>Auto-print delay <input type="range" id="set-autoprint-delay" min="0" max="5" step="1"><span id="autoprint-delay-val"></span></label>
     <button id="btn-test-print" class="ghost">Test print</button>

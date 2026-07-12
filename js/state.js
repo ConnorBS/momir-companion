@@ -18,6 +18,7 @@ export function newGameState(startingLife = 24) {
     life: [startingLife, startingLife],
     momirActive: false, // summon buttons appear only after "New Momir game"
     decks: null,        // deck state from decks.js when playing without physical lands
+    history: [],        // summoned creatures (most recent first) for reprinting
   };
 }
 
@@ -30,6 +31,7 @@ export function defaultSettings() {
     dither: 'atkinson',
     offsetMm: 0,       // horizontal calibration nudge (positive = right)
     fastTransfer: false,
+    reliable: true,    // acknowledged chunk writes — prevents dropped-byte "wraparound" prints
     autoPrint: true,       // auto-print summoned creatures when a printer is connected
     autoPrintDelay: 2,     // grace countdown (s) before auto-print transmits; any touch cancels
     hideCounts: true,  // hide card counts on the summon pad (off to reveal them)
