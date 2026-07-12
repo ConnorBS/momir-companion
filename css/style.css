@@ -249,6 +249,29 @@ dialog > button, dialog .dlg-actions { margin-top: 12px; }
 }
 .gy-list .via { color: var(--muted); font-size: 0.78rem; }
 
+/* art picker gallery */
+#art-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 8px;
+  max-height: 55dvh;
+  overflow-y: auto;
+}
+.art-cell {
+  padding: 0;
+  overflow: hidden;
+  text-align: center;
+  background: var(--panel-2);
+}
+.art-cell img {
+  display: block;
+  width: 100%;
+  height: 92px;
+  object-fit: cover;
+  filter: grayscale(1) contrast(1.25);
+}
+.art-cell span { display: block; font-size: 0.75rem; color: var(--muted); padding: 5px 4px; }
+
 .scry-item { align-items: center; }
 .scry-actions { display: flex; gap: 6px; }
 .scry-actions button { padding: 7px 11px; font-size: 0.85rem; }

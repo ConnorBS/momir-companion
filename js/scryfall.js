@@ -63,6 +63,8 @@ function toCardModel(printing, cmc) {
   return {
     name: printing.name,
     cmc,
+    year: (printing.released_at || '').slice(0, 4),
+    illo: face.illustration_id ?? printing.illustration_id ?? null,
     manaCost: face.mana_cost ?? printing.mana_cost ?? '',
     typeLine: face.type_line ?? printing.type_line ?? '',
     oracleText: face.oracle_text ?? printing.oracle_text ?? '',
@@ -97,6 +99,25 @@ export async function rerollPrinting(oracleId, cmc) {
   if (prints.length === 0) return null;
   const printing = prints[Math.floor(Math.random() * prints.length)];
   return toCardModel(printing, cmc);
+}
+
+/**
+ * Every distinct artwork of a card (one printing per illustration),
+ * oldest first — for the art picker gallery.
+ */
+export async function allArtworks(oracleId, cmc) {
+  const prints = await allPrintings(oracleId);
+  const seen = new Set();
+  const out = [];
+  for (const printing of prints) {
+    const model = toCardModel(printing, cmc);
+    if (!model.art) continue;
+    const key = model.illo || `${model.set}-${model.cn}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(model);
+  }
+  return out;
 }
 
 /** Random printing of a named card (e.g. Momir Vig for the avatar art). */

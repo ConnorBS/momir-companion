@@ -95,6 +95,7 @@ let reveal = null; // { card, canvas, title, kind }
 function setStage(name) {
   $('summon-stage').hidden = name !== 'summon';
   $('card-stage').hidden = name !== 'card';
+  $('art-stage').hidden = name !== 'art';
 }
 
 function buildXButtons() {
@@ -175,19 +176,26 @@ async function showReveal(card, { title, kind, autoPrint = false, copies = 1, ro
   if (autoPrint && Printing.isPrinterConnected()) await printReveal(copies);
 }
 
+let printAbort = null; // aborts the in-flight/queued print when art is rerolled
+
 async function printReveal(copies = 1) {
   if (!reveal?.canvas) return;
   if (!Printing.isPrinterConnected()) {
     toast('Printer not connected — open ⚙ to connect');
     return;
   }
+  printAbort = new AbortController();
+  const signal = printAbort.signal;
   const progress = $('print-progress');
   const bar = $('print-bar');
   progress.hidden = false;
   try {
     for (let i = 0; i < copies; i++) {
       bar.style.width = '0%';
-      await Printing.printCanvas(reveal.canvas, settings, (p) => { bar.style.width = `${p}%`; });
+      const result = await Printing.printCanvas(
+        reveal.canvas, settings, (p) => { bar.style.width = `${p}%`; }, signal,
+      );
+      if (result === 'cancelled') { toast('Print cancelled'); return; }
     }
     toast(copies > 1 ? `Printed ${copies} ✓` : 'Printed ✓');
   } catch (e) {
@@ -202,17 +210,40 @@ $('btn-print-card').addEventListener('click', () => printReveal(1));
 
 $('btn-summon-again').addEventListener('click', () => openSummonPad(summonFlip ? 1 : 0));
 
+// "Other art": stop any pending auto-print and open the artwork gallery —
+// the printing you tap is exactly the version that renders and prints.
 $('btn-reroll-art').addEventListener('click', async () => {
   if (!reveal?.card?.oracleId) return;
-  toast('Fetching another printing…');
+  printAbort?.abort();
+  setStage('art');
+  const grid = $('art-grid');
+  grid.innerHTML = '<p class="hint">Loading printings…</p>';
   try {
-    const fresh = await Scryfall.rerollPrinting(reveal.card.oracleId, reveal.card.cmc);
-    if (!fresh) return;
-    await showReveal(fresh, { title: reveal.title, kind: reveal.kind });
+    const artworks = await Scryfall.allArtworks(reveal.card.oracleId, reveal.card.cmc);
+    grid.innerHTML = artworks.length ? '' : '<p class="sub">No other artwork found.</p>';
+    for (const model of artworks) {
+      const cell = document.createElement('button');
+      cell.className = 'art-cell';
+      cell.innerHTML = `
+        <img src="${model.art}" alt="" loading="lazy" crossorigin="anonymous">
+        <span>${model.set} · ${model.year}</span>`;
+      const img = cell.querySelector('img');
+      img.addEventListener('error', () => {
+        if (!img.src.includes('cors=1')) {
+          img.src = `${model.art}${model.art.includes('?') ? '&' : '?'}cors=1`;
+        }
+      });
+      cell.addEventListener('click', () => {
+        showReveal(model, { title: reveal.title, kind: reveal.kind });
+      });
+      grid.appendChild(cell);
+    }
   } catch (e) {
-    toast(`Reroll failed: ${e.message}`);
+    grid.innerHTML = `<p class="warn">Couldn't load printings: ${e.message}</p>`;
   }
 });
+
+$('btn-art-back').addEventListener('click', () => setStage('card'));
 
 // ---------------------------------------------------------------------------
 // Game setup (⚙ → New Momir game)
@@ -509,13 +540,14 @@ $('btn-print-avatars').addEventListener('click', async () => {
       console.warn('Momir art unavailable, printing text-only:', e.message);
     }
   }
+  // One copy only — press 🖨 Print again for the second player's card
   await showReveal(avatar, {
     title: 'MOMIR BASIC — AVATAR',
     kind: 'avatar',
     autoPrint: connected,
-    copies: 2,
+    copies: 1,
   });
-  if (!connected) toast('Printer not connected — showing preview. Tap 🖨 Print per copy.');
+  if (!connected) toast('Printer not connected — showing preview.');
 });
 
 $('btn-fullscreen').addEventListener('click', () => {

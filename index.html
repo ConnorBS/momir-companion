@@ -59,6 +59,12 @@
       </div>
       <div id="print-progress" hidden><div id="print-bar"></div></div>
     </div>
+    <div id="art-stage" hidden>
+      <h2>Choose an artwork</h2>
+      <p class="sub">Every distinct art this card has ever had. The one you tap is the version that prints.</p>
+      <div id="art-grid"></div>
+      <button id="btn-art-back" class="ghost full">← Back to card</button>
+    </div>
     <button class="ghost dlg-close full">Close</button>
   </div>
 </dialog>
@@ -71,7 +77,7 @@
     <h3>Game</h3>
     <button id="btn-new-game" class="primary big">🎲 New Momir game…</button>
     <button id="btn-end-game" class="ghost full" hidden>✕ End game (back to plain life tracker)</button>
-    <button id="btn-print-avatars" class="ghost full">🖨 Print 2 Momir avatars</button>
+    <button id="btn-print-avatars" class="ghost full">🖨 Print Momir avatar</button>
     <div class="setup-row">
       <label>Starting life
         <input type="number" id="start-life" value="24" min="1" max="99">

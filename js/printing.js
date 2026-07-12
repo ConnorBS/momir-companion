@@ -9,6 +9,7 @@ import {
   getPrinterWidthBytes,
   getPrinterAlignment,
   getPrinterDescription,
+  getDetectedDefinition,
 } from './vendor/phomymo/printer.js';
 import { canvasToRaster, rasterOpts } from './dither.js';
 
@@ -137,6 +138,48 @@ function startKeepalive() {
   }, 45000);
 }
 
+// Abortable generic m-series sender (the M250 path). Mirrors the vendored
+// printBLE() commands, but checks an AbortSignal between chunks: on abort it
+// completes the declared raster with blank rows so the printer finishes
+// cleanly instead of stalling on a half-delivered image.
+const MS = {
+  INIT: new Uint8Array([0x1b, 0x40]),
+  HEAT: (time) => new Uint8Array([0x1b, 0x37, 7, time, 2]),
+  DENSITY: (level) => new Uint8Array([0x1d, 0x7c, level]),
+  HEADER: (widthBytes, heightLines) => new Uint8Array([
+    0x1d, 0x76, 0x30, 0x00, widthBytes, 0x00, heightLines & 0xff, (heightLines >> 8) & 0xff,
+  ]),
+  FEED: (dots) => new Uint8Array([0x1b, 0x4a, dots]),
+};
+const HEAT_TIMES = [40, 60, 80, 100, 120, 140, 160, 200];
+
+async function printMSeriesAbortable(transport, raster, { density, feed, onProgress, signal }) {
+  const { data, widthBytes, heightLines } = raster;
+  await transport.send(MS.INIT);
+  await transport.delay(100);
+  await transport.send(MS.HEAT(HEAT_TIMES[Math.max(0, Math.min(7, density - 1))]));
+  await transport.delay(30);
+  await transport.send(MS.DENSITY(density));
+  await transport.delay(50);
+  await transport.send(MS.HEADER(widthBytes, heightLines));
+
+  const chunkSize = 128;
+  const blank = new Uint8Array(chunkSize);
+  let cancelled = false;
+  for (let i = 0; i < data.length; i += chunkSize) {
+    const size = Math.min(chunkSize, data.length - i);
+    if (!cancelled && signal?.aborted) cancelled = true;
+    await transport.send(cancelled ? blank.subarray(0, size) : data.slice(i, i + size));
+    await transport.delay(cancelled ? 8 : 20);
+    if (!cancelled && onProgress) onProgress(Math.round((i + size) / data.length * 100));
+  }
+
+  await transport.delay(300);
+  await transport.send(MS.FEED(feed));
+  await transport.delay(500);
+  return cancelled ? 'cancelled' : 'done';
+}
+
 /** GATT-only reconnect to the already-paired device — never opens the picker. */
 async function tryReconnect(transport) {
   if (transport.isConnected()) return true;
@@ -167,13 +210,14 @@ let printQueue = Promise.resolve();
  *                             paperWidthMm, continuous, offsetMm, fastTransfer}
  * @param {Function} onProgress - percent callback
  */
-export function printCanvas(canvas, settings, onProgress = null) {
-  const job = printQueue.then(() => doPrint(canvas, settings, onProgress));
+export function printCanvas(canvas, settings, onProgress = null, signal = null) {
+  const job = printQueue.then(() => doPrint(canvas, settings, onProgress, signal));
   printQueue = job.catch(() => { /* a failed job must not block the queue */ });
   return job;
 }
 
-async function doPrint(canvas, settings, onProgress) {
+async function doPrint(canvas, settings, onProgress, signal) {
+  if (signal?.aborted) return 'cancelled'; // aborted while waiting in the queue
   await ensureDefinitions();
   const base = BLETransport.getShared();
   if (!base.isConnected() && !(await tryReconnect(base))) {
@@ -190,17 +234,32 @@ async function doPrint(canvas, settings, onProgress) {
     const head = getPrinterWidthBytes(deviceName) * 8;
     const padded = padToHead(canvas, head, deviceName, settings.offsetMm || 0);
     const raster = canvasToRaster(padded, rasterOpts(settings));
-    await print(transport, raster, {
-      isBLE: true,
-      deviceName,
-      density: settings.density,
-      feed: settings.feed,
-      onProgress,
-    });
+
+    // Generic m-series (the M250 path) goes through our abortable sender;
+    // specialty protocols fall back to the vendored one (abort only pre-start).
+    const protocol = getDetectedDefinition(deviceName)?.protocol ?? 'm-series';
+    let result = 'done';
+    if (protocol === 'm-series') {
+      result = await printMSeriesAbortable(transport, raster, {
+        density: settings.density,
+        feed: settings.feed,
+        onProgress,
+        signal,
+      });
+    } else {
+      await print(transport, raster, {
+        isBLE: true,
+        deviceName,
+        density: settings.density,
+        feed: settings.feed,
+        onProgress,
+      });
+    }
 
     // Data is sent, but the head is still printing from its buffer — hold the
     // queue for the estimated physical print time before the next job.
-    await base.delay(Math.min(10000, raster.heightLines * MS_PER_ROW));
+    await base.delay(result === 'cancelled' ? 1500 : Math.min(10000, raster.heightLines * MS_PER_ROW));
+    return result;
   } finally {
     printing = false;
   }

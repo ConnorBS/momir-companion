@@ -24,14 +24,17 @@ once you start a game from the ⚙ menu.
   automatically** (a random printing's art each time), so only cards that
   actually hit the table get printed; turn that off in settings if you use
   real land cards.
-- **Print two avatars to start** — one tap prints a *Momir Vig, Simic
-  Visionary* reference card for each player, with the activation rules and
-  your chosen starting life.
+- **Print a Momir avatar** — prints one *Momir Vig, Simic Visionary*
+  reference card with the activation rules and your chosen starting life;
+  tap 🖨 Print again for the second player's copy.
 - **Summon by tapping a number** — hit **🎲 Summon** on your side, then tell
   it *how much mana you're spending* (that's Momir's **X**). It rolls a
   random creature at that mana value and prints it. The summon pad and the
   card preview rotate to face whoever tapped. Card counts per X are hidden
   by default (reveal them in settings).
+- **Pick your artwork** — 🎨 Other art cancels any in-progress auto-print
+  and opens a gallery of every distinct art the card has ever had; the one
+  you tap is the version that prints.
 - **Momir rolls with correct odds** — every card *name* has an equal chance
   (selection uses Scryfall `oracle_cards` data, one entry per name). Once a
   name is chosen, the **art is a random printing from all of Magic history**.
