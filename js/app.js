@@ -162,7 +162,49 @@ async function presentCanvas(canvas, { card = null, title = null, kind, autoPrin
     info.textContent = rollInfo;
     box.appendChild(info);
   }
-  if (autoPrint && Printing.isPrinterConnected()) await printReveal(copies);
+  if (autoPrint && Printing.isPrinterConnected()) await autoPrintWithGrace(copies);
+}
+
+/**
+ * Grace window before an auto-print transmits anything: a visible countdown
+ * (0-5s, configurable) during which ANY touch on the screen cancels the
+ * print outright — nothing is ever sent to the printer. Tapping 🖨 Print
+ * still works immediately (the cancel fires first, then the button's click).
+ */
+function autoPrintWithGrace(copies = 1) {
+  const delay = Math.max(0, Math.min(5, settings.autoPrintDelay ?? 2));
+  if (delay === 0) return printReveal(copies);
+
+  return new Promise((resolve) => {
+    const bar = $('autoprint-bar');
+    let remaining = delay;
+    $('autoprint-secs').textContent = remaining;
+    bar.hidden = false;
+
+    let tick, timer;
+    const cleanup = () => {
+      clearInterval(tick);
+      clearTimeout(timer);
+      document.removeEventListener('pointerdown', cancel, true);
+      bar.hidden = true;
+    };
+    const cancel = () => {
+      cleanup();
+      toast('Auto-print cancelled — tap 🖨 Print when ready');
+      resolve();
+    };
+
+    tick = setInterval(() => {
+      remaining -= 1;
+      if (remaining > 0) $('autoprint-secs').textContent = remaining;
+    }, 1000);
+    timer = setTimeout(async () => {
+      cleanup();
+      await printReveal(copies);
+      resolve();
+    }, delay * 1000);
+    document.addEventListener('pointerdown', cancel, { once: true, capture: true });
+  });
 }
 
 /** Render a card into the reveal stage; optionally auto-print `copies`. */
@@ -686,6 +728,8 @@ function syncPrinterPanel() {
   $('feed-val').textContent = settings.feed;
   $('set-fast').checked = !!settings.fastTransfer;
   $('set-autoprint').checked = settings.autoPrint;
+  $('set-autoprint-delay').value = settings.autoPrintDelay ?? 2;
+  $('autoprint-delay-val').textContent = `${settings.autoPrintDelay ?? 2}s`;
   const connected = Printing.isPrinterConnected();
   $('btn-connect').textContent = connected ? `Connected: ${Printing.printerName()}` : 'Connect Phomemo';
   const info = Printing.printerInfo();
@@ -717,6 +761,7 @@ for (const [id, key] of [
   ['set-contrast', 'contrast'],
   ['set-feed', 'feed'],
   ['set-offset', 'offsetMm'],
+  ['set-autoprint-delay', 'autoPrintDelay'],
 ]) {
   $(id).addEventListener('input', () => {
     settings[key] = Number($(id).value);

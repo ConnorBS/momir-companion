@@ -30,7 +30,8 @@ export function defaultSettings() {
     dither: 'atkinson',
     offsetMm: 0,       // horizontal calibration nudge (positive = right)
     fastTransfer: false,
-    autoPrint: true,   // auto-print summoned creatures when a printer is connected
+    autoPrint: true,       // auto-print summoned creatures when a printer is connected
+    autoPrintDelay: 2,     // grace countdown (s) before auto-print transmits; any touch cancels
     hideCounts: true,  // hide card counts on the summon pad (off to reveal them)
     printLands: true,  // print drawn lands (turn off when using real land cards)
     paperWidthMm: 57,  // roll width; content renders at this and centers on the head

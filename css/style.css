@@ -223,6 +223,16 @@ dialog > button, dialog .dlg-actions { margin-top: 12px; }
 #card-reveal .roll-info { color: var(--muted); font-size: 0.78rem; margin-top: 6px; }
 #card-reveal .hint { color: var(--muted); }
 
+#autoprint-bar {
+  margin-top: 10px;
+  padding: 10px 14px;
+  border: 1px solid var(--accent);
+  border-radius: 999px;
+  text-align: center;
+  font-size: 0.92rem;
+  color: var(--accent);
+}
+
 #print-progress { height: 8px; background: var(--panel-2); border-radius: 4px; margin-top: 10px; overflow: hidden; }
 #print-bar { height: 100%; width: 0; background: var(--accent); transition: width 0.15s; }
 

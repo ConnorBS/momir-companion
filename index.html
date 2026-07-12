@@ -57,6 +57,7 @@
         <button id="btn-reroll-art" class="ghost">🎨 Other art</button>
         <button id="btn-summon-again" class="ghost">🎲 Again</button>
       </div>
+      <div id="autoprint-bar" hidden>🖨 Printing in <b id="autoprint-secs">2</b>s — touch anywhere to cancel</div>
       <div id="print-progress" hidden><div id="print-bar"></div></div>
     </div>
     <div id="art-stage" hidden>
@@ -125,6 +126,7 @@
     <label>Feed after print <input type="range" id="set-feed" min="0" max="120" step="8"><span id="feed-val"></span></label>
     <label class="check"><input type="checkbox" id="set-fast"> Fast transfer (uncheck if prints garble)</label>
     <label class="check"><input type="checkbox" id="set-autoprint"> Auto-print summoned creatures</label>
+    <label>Auto-print delay <input type="range" id="set-autoprint-delay" min="0" max="5" step="1"><span id="autoprint-delay-val"></span></label>
     <button id="btn-test-print" class="ghost">Test print</button>
     <p id="no-bluetooth" class="warn" hidden>
       Web Bluetooth isn't available in this browser. Use Chrome or Edge on
