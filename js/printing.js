@@ -161,20 +161,25 @@ const HEAT_TIMES = [40, 60, 80, 100, 120, 140, 160, 200];
 const BLOCK_ROWS = 255;
 
 /**
- * Send one raster chunk. Acknowledged mode uses write-WITH-response: the
- * printer confirms every chunk, so nothing can be silently dropped — a lost
- * chunk is what desyncs the raster stream and produces "wrapped around"
- * prints with the printer stuck on "Waiting for data". The ACK round-trip
- * also self-paces the link, so no artificial delay is needed.
+ * Send one raster chunk. Acknowledged mode uses write-WITH-response so the
+ * radio link can't silently drop packets — but the printer's INTERNAL buffer
+ * (between its BLE chip and the print head) can still overflow when the head
+ * burns dark rows slowly. ACKs can't see that, so pacing (delayMs) matched
+ * to the image darkness is what actually prevents "wrapped around" prints.
  */
-async function sendChunk(transport, base, payload, reliable, cancelled) {
+async function sendChunk(transport, base, payload, reliable, delayMs) {
   if (reliable && base.writeChar?.properties?.write) {
     await base.writeChar.writeValue(payload.buffer);
+    if (delayMs > 0) await base.delay(delayMs);
   } else {
     await transport.send(payload);
-    await transport.delay(cancelled ? 8 : 20);
+    await transport.delay(delayMs);
   }
 }
+
+// Bits-set lookup for measuring how dark a raster block is (1 bit = 1 black dot)
+const POPCOUNT = new Uint8Array(256);
+for (let i = 1; i < 256; i++) POPCOUNT[i] = (i & 1) + POPCOUNT[i >> 1];
 
 async function printMSeriesAbortable(transport, base, raster, { density, feed, onProgress, signal, reliable }) {
   const { data, widthBytes, heightLines } = raster;
@@ -191,18 +196,29 @@ async function printMSeriesAbortable(transport, base, raster, { density, feed, o
   for (let row = 0; row < heightLines; row += BLOCK_ROWS) {
     if (cancelled) break; // cancelled mid-block: skip the remaining blocks entirely
     const rows = Math.min(BLOCK_ROWS, heightLines - row);
-    await transport.send(MS.HEADER(widthBytes, rows));
     const start = row * widthBytes;
     const end = start + rows * widthBytes;
+
+    // Darkness-adaptive pacing: dark rows burn slowly, so the darker the
+    // block, the slower we feed it. A mostly-white block flows fast; a
+    // near-black one gets ~4x more time per chunk plus a drain pause.
+    let blackBits = 0;
+    for (let i = start; i < end; i++) blackBits += POPCOUNT[data[i]];
+    const darkness = blackBits / ((end - start) * 8);
+    const chunkDelay = Math.round(10 + darkness * 50);
+
+    await transport.send(MS.HEADER(widthBytes, rows));
     for (let i = start; i < end; i += chunkSize) {
       const size = Math.min(chunkSize, end - i);
       if (!cancelled && signal?.aborted) cancelled = true;
       // A started block must be completed (with blanks if cancelled) so the
       // printer isn't left waiting on a half-delivered raster.
       const payload = cancelled ? blank.slice(0, size) : data.slice(i, i + size);
-      await sendChunk(transport, base, payload, reliable, cancelled);
+      await sendChunk(transport, base, payload, reliable, cancelled ? 4 : chunkDelay);
       if (!cancelled && onProgress) onProgress(Math.round((i + size) / data.length * 100));
     }
+    // Let the head drain the block before the next one lands in the buffer
+    if (!cancelled) await base.delay(150 + Math.round(darkness * 900));
   }
 
   await transport.delay(300);
