@@ -23,9 +23,13 @@ export function newGameState(startingLife = 24) {
 
 export function defaultSettings() {
   return {
-    density: 6,
+    density: 5,        // 6+ tends to bleed and muddy the art on receipt paper
     feed: 40,
     contrast: 1.25,
+    brightness: 1.15,  // gamma lift to offset thermal dot gain
+    dither: 'atkinson',
+    offsetMm: 0,       // horizontal calibration nudge (positive = right)
+    fastTransfer: false,
     autoPrint: true,   // auto-print summoned creatures when a printer is connected
     hideCounts: true,  // hide card counts on the summon pad (off to reveal them)
     printLands: true,  // print drawn lands (turn off when using real land cards)

@@ -10,9 +10,12 @@ import {
   getPrinterAlignment,
   getPrinterDescription,
 } from './vendor/phomymo/printer.js';
-import { canvasToRaster } from './dither.js';
+import { canvasToRaster, rasterOpts } from './dither.js';
 
 const DOTS_PER_MM = 8; // 203 dpi
+// Rough physical print speed used to hold the queue until a job clears the
+// head; sending the next job's init early truncates the one still printing.
+const MS_PER_ROW = 5;
 
 const DEFAULT_WIDTH_BYTES = 72; // M250: 72 bytes = 576 dots @ 203dpi
 
@@ -84,22 +87,37 @@ export async function printerWidthDots(settings = null) {
 /**
  * Position content on the full head for the loaded roll: centered for
  * center-fed printers, flush right for right-aligned ones (per phomymo's
- * printer definitions).
+ * printer definitions), plus the user's calibration offset in mm
+ * (positive shifts toward the right edge of the print).
  */
-function padToHead(canvas, headDots, deviceName) {
-  if (canvas.width >= headDots) return canvas;
+function padToHead(canvas, headDots, deviceName, offsetMm = 0) {
+  const offset = Math.round(offsetMm * DOTS_PER_MM);
+  if (canvas.width >= headDots && !offset) return canvas;
   const padded = document.createElement('canvas');
-  padded.width = headDots;
+  padded.width = Math.max(headDots, canvas.width);
   padded.height = canvas.height;
   const ctx = padded.getContext('2d');
   ctx.fillStyle = '#fff';
   ctx.fillRect(0, 0, padded.width, padded.height);
   const alignment = getPrinterAlignment(deviceName);
-  const x = alignment === 'right' ? headDots - canvas.width
+  const base = alignment === 'right' ? padded.width - canvas.width
     : alignment === 'left' ? 0
-    : Math.round((headDots - canvas.width) / 2);
-  ctx.drawImage(canvas, x, 0);
+    : Math.round((padded.width - canvas.width) / 2);
+  ctx.drawImage(canvas, Math.max(0, Math.min(padded.width - canvas.width, base + offset)), 0);
   return padded;
+}
+
+/**
+ * Faster BLE transfer: the vendored protocol pauses 20ms between 128-byte
+ * chunks, which is conservative. This wrapper halves only those short
+ * chunk delays, leaving init/heat timing untouched.
+ */
+function fastTransport(transport) {
+  return {
+    send: (data) => transport.send(data),
+    delay: (ms) => transport.delay(ms <= 20 ? Math.max(8, ms / 2) : ms),
+    waitForResponse: transport.waitForResponse?.bind(transport),
+  };
 }
 
 // Media-type command shared across Phomemo firmwares:
@@ -107,23 +125,38 @@ function padToHead(canvas, headDots, deviceName) {
 const MEDIA_CONTINUOUS = new Uint8Array([0x1f, 0x11, 0x0b]);
 const MEDIA_GAPS = new Uint8Array([0x1f, 0x11, 0x0a]);
 
+// Jobs are chained so a second print can never start while the printer is
+// still working through the first one's buffer (its ESC @ init would
+// truncate the print mid-card).
+let printQueue = Promise.resolve();
+
 /**
  * Dither a composed receipt canvas and send it to the connected printer.
+ * Queued: concurrent calls run strictly one after another.
  * @param {HTMLCanvasElement} canvas
- * @param {Object} settings - {density, feed, contrast, paperWidthMm, continuous}
+ * @param {Object} settings - {density, feed, contrast, brightness, dither,
+ *                             paperWidthMm, continuous, offsetMm, fastTransfer}
  * @param {Function} onProgress - percent callback
  */
-export async function printCanvas(canvas, settings, onProgress = null) {
+export function printCanvas(canvas, settings, onProgress = null) {
+  const job = printQueue.then(() => doPrint(canvas, settings, onProgress));
+  printQueue = job.catch(() => { /* a failed job must not block the queue */ });
+  return job;
+}
+
+async function doPrint(canvas, settings, onProgress) {
   await ensureDefinitions();
-  const transport = BLETransport.getShared();
-  if (!transport.isConnected()) throw new Error('Printer not connected');
-  const deviceName = transport.getDeviceName();
+  const base = BLETransport.getShared();
+  if (!base.isConnected()) throw new Error('Printer not connected');
+  const deviceName = base.getDeviceName();
+  const transport = settings.fastTransfer ? fastTransport(base) : base;
 
   await transport.send(settings.continuous !== false ? MEDIA_CONTINUOUS : MEDIA_GAPS);
   await transport.delay(30);
 
   const head = getPrinterWidthBytes(deviceName) * 8;
-  const raster = canvasToRaster(padToHead(canvas, head, deviceName), { contrast: settings.contrast });
+  const padded = padToHead(canvas, head, deviceName, settings.offsetMm || 0);
+  const raster = canvasToRaster(padded, rasterOpts(settings));
   await print(transport, raster, {
     isBLE: true,
     deviceName,
@@ -131,4 +164,8 @@ export async function printCanvas(canvas, settings, onProgress = null) {
     feed: settings.feed,
     onProgress,
   });
+
+  // Data is sent, but the head is still printing from its buffer — hold the
+  // queue for the estimated physical print time before the next job.
+  await base.delay(Math.min(10000, raster.heightLines * MS_PER_ROW));
 }

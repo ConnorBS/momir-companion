@@ -6,7 +6,7 @@
  * on white so it survives dithering crisply; only the art actually dithers.
  */
 
-const PAD = 8;
+const PAD = 14; // ~1.75mm margin — narrow rolls can sit a little off-center
 
 function loadImage(url, retry = true) {
   return new Promise((resolve, reject) => {

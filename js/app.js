@@ -13,7 +13,7 @@ import * as Decks from './decks.js';
 import * as Scryfall from './scryfall.js';
 import * as Printing from './printing.js';
 import { renderCard } from './receipt.js';
-import { canvasToRaster, rasterToCanvas } from './dither.js';
+import { canvasToRaster, rasterToCanvas, rasterOpts } from './dither.js';
 
 const $ = (id) => document.getElementById(id);
 const MAX_X = 16;
@@ -157,7 +157,7 @@ async function showReveal(card, { title, kind, autoPrint = false, copies = 1, ro
   try {
     const canvas = await renderCard(card, width, { title });
     reveal.canvas = canvas;
-    const preview = rasterToCanvas(canvasToRaster(canvas, { contrast: settings.contrast }));
+    const preview = rasterToCanvas(canvasToRaster(canvas, rasterOpts(settings)));
     preview.style.width = '100%';
     box.innerHTML = '';
     box.appendChild(preview);
@@ -530,12 +530,18 @@ $('btn-fullscreen').addEventListener('click', () => {
 function syncPrinterPanel() {
   $('set-paper-width').value = String(settings.paperWidthMm || 57);
   $('set-continuous').checked = settings.continuous !== false;
+  $('set-offset').value = settings.offsetMm || 0;
+  $('offset-val').textContent = `${settings.offsetMm > 0 ? '+' : ''}${settings.offsetMm || 0}mm`;
+  $('set-dither').value = settings.dither || 'atkinson';
   $('set-density').value = settings.density;
   $('density-val').textContent = settings.density;
+  $('set-brightness').value = settings.brightness ?? 1.15;
+  $('brightness-val').textContent = Number(settings.brightness ?? 1.15).toFixed(2);
   $('set-contrast').value = settings.contrast;
   $('contrast-val').textContent = Number(settings.contrast).toFixed(2);
   $('set-feed').value = settings.feed;
   $('feed-val').textContent = settings.feed;
+  $('set-fast').checked = !!settings.fastTransfer;
   $('set-autoprint').checked = settings.autoPrint;
   const connected = Printing.isPrinterConnected();
   $('btn-connect').textContent = connected ? `Connected: ${Printing.printerName()}` : 'Connect Phomemo';
@@ -564,8 +570,10 @@ $('btn-connect').addEventListener('click', async () => {
 
 for (const [id, key] of [
   ['set-density', 'density'],
+  ['set-brightness', 'brightness'],
   ['set-contrast', 'contrast'],
   ['set-feed', 'feed'],
+  ['set-offset', 'offsetMm'],
 ]) {
   $(id).addEventListener('input', () => {
     settings[key] = Number($(id).value);
@@ -573,6 +581,16 @@ for (const [id, key] of [
     syncPrinterPanel();
   });
 }
+
+$('set-dither').addEventListener('change', () => {
+  settings.dither = $('set-dither').value;
+  State.saveSettings(settings);
+});
+
+$('set-fast').addEventListener('change', () => {
+  settings.fastTransfer = $('set-fast').checked;
+  State.saveSettings(settings);
+});
 
 $('set-autoprint').addEventListener('change', () => {
   settings.autoPrint = $('set-autoprint').checked;
@@ -590,21 +608,35 @@ $('set-continuous').addEventListener('change', () => {
 });
 
 $('btn-test-print').addEventListener('click', async () => {
+  // Calibration pattern: a border box at the configured paper width with
+  // edge arrows — if either side is cut off, adjust the Position slider.
   const width = await Printing.printerWidthDots(settings);
+  const height = 170;
   const canvas = document.createElement('canvas');
   canvas.width = width;
-  canvas.height = 120;
+  canvas.height = height;
   const ctx = canvas.getContext('2d');
   ctx.fillStyle = '#fff';
-  ctx.fillRect(0, 0, width, 120);
+  ctx.fillRect(0, 0, width, height);
+  ctx.strokeStyle = '#000';
+  ctx.lineWidth = 3;
+  ctx.strokeRect(1, 1, width - 3, height - 3);
   ctx.fillStyle = '#000';
-  ctx.font = 'bold 36px Georgia, serif';
-  ctx.fillText('Momir Companion', 8, 20);
-  ctx.font = '20px Courier New, monospace';
-  ctx.fillText(`${width} dots wide · density ${settings.density}`, 8, 70);
+  ctx.textBaseline = 'top';
+  ctx.font = 'bold 26px Georgia, serif';
+  ctx.fillText('Momir Companion', 16, 14);
+  ctx.font = '18px Courier New, monospace';
+  ctx.fillText(`${settings.paperWidthMm}mm · density ${settings.density}`, 16, 52);
+  ctx.fillText(`${settings.dither} · offset ${settings.offsetMm > 0 ? '+' : ''}${settings.offsetMm || 0}mm`, 16, 76);
+  ctx.font = 'bold 20px Courier New, monospace';
+  ctx.fillText('<LEFT', 8, height - 38);
+  ctx.fillText('RIGHT>', width - 8 - ctx.measureText('RIGHT>').width, height - 38);
+  ctx.font = '16px Courier New, monospace';
+  const hint = 'box cut off? adjust Position';
+  ctx.fillText(hint, Math.round((width - ctx.measureText(hint).width) / 2), height - 112);
   try {
     await Printing.printCanvas(canvas, settings);
-    toast('Test sent ✓');
+    toast('Calibration sent — if the box is cut off, adjust Position');
   } catch (e) {
     toast(`Test failed: ${e.message}`);
   }

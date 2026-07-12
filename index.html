@@ -97,9 +97,20 @@
       </select>
     </label>
     <label class="check"><input type="checkbox" id="set-continuous"> Continuous paper (no label gaps)</label>
+    <label>Position <input type="range" id="set-offset" min="-8" max="8" step="0.5"><span id="offset-val"></span></label>
+    <label>Dither
+      <select id="set-dither">
+        <option value="atkinson">Atkinson — crisp, light (best for thermal)</option>
+        <option value="fs">Floyd–Steinberg — smooth, darker</option>
+        <option value="bayer">Ordered — regular pattern</option>
+        <option value="threshold">Threshold — text only</option>
+      </select>
+    </label>
     <label>Density <input type="range" id="set-density" min="1" max="8" step="1"><span id="density-val"></span></label>
+    <label>Brightness <input type="range" id="set-brightness" min="0.7" max="1.6" step="0.05"><span id="brightness-val"></span></label>
     <label>Art contrast <input type="range" id="set-contrast" min="0.8" max="2" step="0.05"><span id="contrast-val"></span></label>
     <label>Feed after print <input type="range" id="set-feed" min="0" max="120" step="8"><span id="feed-val"></span></label>
+    <label class="check"><input type="checkbox" id="set-fast"> Fast transfer (uncheck if prints garble)</label>
     <label class="check"><input type="checkbox" id="set-autoprint"> Auto-print summoned creatures</label>
     <button id="btn-test-print" class="ghost">Test print</button>
     <p id="no-bluetooth" class="warn" hidden>
