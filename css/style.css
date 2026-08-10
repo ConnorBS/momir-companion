@@ -296,9 +296,14 @@ dialog > button, dialog .dlg-actions { margin-top: 12px; }
 .scry-actions button { padding: 7px 11px; font-size: 0.85rem; }
 
 /* ---------- toast ---------- */
+/* Lives inside the open dialog while one is up (see toast() in app.js), so it
+   stays viewport-centred and above the dialog's own content. */
 #toast {
   position: fixed; left: 50%; top: 50%; transform: translate(-50%, -50%);
   background: #000; color: #fff; border: 1px solid var(--accent);
   padding: 12px 20px; border-radius: 999px; z-index: 100; font-size: 0.95rem;
   max-width: 90vw; text-align: center; box-shadow: 0 4px 20px rgba(0, 0, 0, 0.5);
+  /* Never a hit-test target: it sits dead centre over the dialog, so without
+     this it would steal taps meant for the buttons underneath. */
+  pointer-events: none;
 }

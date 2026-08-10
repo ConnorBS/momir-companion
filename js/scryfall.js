@@ -12,7 +12,19 @@
 const API = 'https://api.scryfall.com';
 const bucketCache = new Map();
 
+// Scryfall asks clients to leave 50-100ms between requests. A batched 7-land
+// draw or a paginated printings lookup would otherwise fire back to back, so
+// every API call passes through this gate.
+const MIN_REQUEST_GAP_MS = 80;
+let requestGate = Promise.resolve();
+
+function awaitTurn() {
+  requestGate = requestGate.then(() => new Promise((resolve) => setTimeout(resolve, MIN_REQUEST_GAP_MS)));
+  return requestGate;
+}
+
 async function fetchJson(url) {
+  await awaitTurn();
   const resp = await fetch(url, { headers: { Accept: 'application/json' } });
   if (!resp.ok) throw new Error(`Scryfall ${resp.status} for ${url}`);
   return resp.json();
@@ -83,14 +95,35 @@ function toCardModel(printing, cmc) {
 /**
  * Full Momir roll: random name at CMC x, then a random printing of it.
  * Returns {card, printCount} or null if the bucket is empty.
+ *
+ * The index is a weekly snapshot, so an entry's oracle_id can go stale
+ * (Scryfall answers 404 for a search that matches nothing). One dud must not
+ * cost the player their roll, so a few other names are tried before giving up
+ * — a real outage still surfaces its error after the retries.
  */
-export async function rollCreature(cmc) {
-  const pick = await randomCreatureName(cmc);
-  if (!pick) return null;
-  const prints = await allPrintings(pick.id);
-  if (prints.length === 0) return null;
-  const printing = prints[Math.floor(Math.random() * prints.length)];
-  return { card: toCardModel(printing, cmc), printCount: prints.length };
+export async function rollCreature(cmc, attempts = 3) {
+  const bucket = await loadBucket(cmc);
+  if (bucket.length === 0) return null;
+  // Sample without replacement so a tiny bucket (cmc 13 holds one card) can't
+  // spin on the same entry, and the first pick is still uniform over names.
+  const pool = [...bucket];
+  let lastError = null;
+  for (let attempt = 0; attempt < attempts && pool.length > 0; attempt++) {
+    const [pick] = pool.splice(Math.floor(Math.random() * pool.length), 1);
+    try {
+      const prints = await allPrintings(pick.id);
+      if (prints.length > 0) {
+        const printing = prints[Math.floor(Math.random() * prints.length)];
+        return { card: toCardModel(printing, cmc), printCount: prints.length };
+      }
+      console.warn(`No paper printings for "${pick.n}" (${pick.id}) — rerolling`);
+    } catch (e) {
+      lastError = e;
+      console.warn(`Printings lookup failed for "${pick.n}": ${e.message} — rerolling`);
+    }
+  }
+  if (lastError) throw lastError;
+  return null;
 }
 
 /** Re-roll only the art/printing for an already-summoned card. */

@@ -27,9 +27,42 @@ const bucketCounts = {};
 // Helpers
 // ---------------------------------------------------------------------------
 
+/**
+ * Modal dialogs render in the browser's top layer, which no z-index on a
+ * body-level element can beat — so a toast left on <body> is invisible behind
+ * the dialog backdrop, and most of these messages ("Printed ✓", "Library
+ * shuffled", "Auto-print cancelled") fire with a dialog open. Track which
+ * dialog is on top and re-home the toast into it before showing it.
+ */
+const dialogStack = [];
+
+function openModal(dlg) {
+  if (!dlg.open) {
+    dlg.showModal();
+    dialogStack.push(dlg);
+  }
+  return dlg;
+}
+
+document.querySelectorAll('dialog').forEach((dlg) => {
+  dlg.addEventListener('close', () => {
+    const at = dialogStack.indexOf(dlg);
+    if (at >= 0) dialogStack.splice(at, 1);
+  });
+});
+
+function toastHost() {
+  for (let i = dialogStack.length - 1; i >= 0; i--) {
+    if (dialogStack[i].open) return dialogStack[i];
+  }
+  return document.body;
+}
+
 function toast(msg, ms = 2400) {
   const el = $('toast');
   el.textContent = msg;
+  const host = toastHost();
+  if (el.parentElement !== host) host.appendChild(el);
   el.hidden = false;
   clearTimeout(el._timer);
   el._timer = setTimeout(() => { el.hidden = true; }, ms);
@@ -121,7 +154,7 @@ function openSummonPad(player) {
   flipWrap.classList.toggle('flip', summonFlip);
   setStage('summon');
   buildXButtons();
-  if (!$('dlg-summon').open) $('dlg-summon').showModal();
+  openModal($('dlg-summon'));
 }
 
 document.querySelectorAll('.summon-btn').forEach((btn) => {
@@ -151,10 +184,12 @@ async function doSummon(x) {
 async function presentCanvas(canvas, { card = null, title = null, kind, autoPrint = false, copies = 1, rollInfo = '', grace = true }) {
   reveal = { card, title, kind, canvas };
   setStage('card');
-  $('btn-reroll-art').hidden = kind !== 'creature' && kind !== 'land';
+  // The gallery needs an oracle id to look printings up; the compact
+  // symbol/text land styles are locally drawn and have none.
+  $('btn-reroll-art').hidden = !card?.oracleId || (kind !== 'creature' && kind !== 'land');
   $('btn-summon-again').hidden = kind !== 'creature';
   const box = $('card-reveal');
-  if (!$('dlg-summon').open) $('dlg-summon').showModal();
+  openModal($('dlg-summon'));
   const preview = rasterToCanvas(canvasToRaster(canvas, rasterOpts(settings)));
   preview.style.width = '100%';
   box.innerHTML = '';
@@ -170,11 +205,18 @@ async function presentCanvas(canvas, { card = null, title = null, kind, autoPrin
   }
 }
 
+// Cancels a pending auto-print countdown, if one is running. The dialog's own
+// controls call this from their click handlers rather than relying on the
+// document-level pointerdown below — see the note there.
+let graceCancel = null;
+const cancelAutoPrintGrace = () => graceCancel?.();
+
 /**
  * Grace window before an auto-print transmits anything: a visible countdown
- * (0-5s, configurable) during which ANY touch on the screen cancels the
- * print outright — nothing is ever sent to the printer. Tapping 🖨 Print
- * still works immediately (the cancel fires first, then the button's click).
+ * (0-5s, configurable) during which a touch anywhere outside the dialog's own
+ * buttons cancels the print outright — nothing is ever sent to the printer.
+ * The dialog's buttons keep working on the first tap: they cancel the
+ * countdown themselves and then do their job.
  */
 function autoPrintWithGrace(copies = 1) {
   if (Printing.isPrintBusy()) {
@@ -194,13 +236,25 @@ function autoPrintWithGrace(copies = 1) {
     const cleanup = () => {
       clearInterval(tick);
       clearTimeout(timer);
-      document.removeEventListener('pointerdown', cancel, true);
+      document.removeEventListener('pointerdown', onPointerDown, true);
+      graceCancel = null;
       bar.hidden = true;
     };
-    const cancel = () => {
+    const cancel = (announce = true) => {
       cleanup();
-      toast('Auto-print cancelled — tap 🖨 Print when ready');
+      if (announce) toast('Auto-print cancelled — tap 🖨 Print when ready');
       resolve();
+    };
+    graceCancel = () => cancel(false);
+
+    // Taps on the dialog's own buttons must NOT be handled here: hiding the
+    // countdown bar shrinks the dialog, the browser re-centres it mid-tap, and
+    // the button slides out from under the finger so its click never fires.
+    // Those buttons call cancelAutoPrintGrace() from their click handlers
+    // instead, once the click has already been dispatched.
+    const onPointerDown = (event) => {
+      if (event.target?.closest?.('#dlg-summon button')) return;
+      cancel();
     };
 
     tick = setInterval(() => {
@@ -212,7 +266,7 @@ function autoPrintWithGrace(copies = 1) {
       await printReveal(copies);
       resolve();
     }, delay * 1000);
-    document.addEventListener('pointerdown', cancel, { once: true, capture: true });
+    document.addEventListener('pointerdown', onPointerDown, true);
   });
 }
 
@@ -221,7 +275,7 @@ async function showReveal(card, opts) {
   setStage('card');
   const box = $('card-reveal');
   box.innerHTML = '<p class="hint">Rendering…</p>';
-  if (!$('dlg-summon').open) $('dlg-summon').showModal();
+  openModal($('dlg-summon'));
   const width = await Printing.printerWidthDots(settings);
   let canvas;
   try {
@@ -296,9 +350,19 @@ async function printReveal(copies = 1) {
   }
 }
 
-$('btn-print-card').addEventListener('click', () => printReveal(1));
+$('btn-print-card').addEventListener('click', () => {
+  cancelAutoPrintGrace(); // tapping Print prints now, instead of waiting out the countdown
+  printReveal(1);
+});
 
-$('btn-summon-again').addEventListener('click', () => openSummonPad(summonFlip ? 1 : 0));
+$('btn-summon-again').addEventListener('click', () => {
+  cancelAutoPrintGrace();
+  openSummonPad(summonFlip ? 1 : 0);
+});
+
+// Closing the reveal (Close button, Escape, or code) must never leave a
+// countdown running that would print into a dismissed dialog.
+$('dlg-summon').addEventListener('close', cancelAutoPrintGrace);
 
 // ---------------------------------------------------------------------------
 // Summon history — every roll is kept so any card can be reprinted later
@@ -335,6 +399,7 @@ $('btn-history-back').addEventListener('click', () => setStage('summon'));
 // "Other art": stop any pending auto-print and open the artwork gallery —
 // the printing you tap is exactly the version that renders and prints.
 $('btn-reroll-art').addEventListener('click', async () => {
+  cancelAutoPrintGrace();
   if (!reveal?.card?.oracleId) return;
   printAbort?.abort();
   setStage('art');
@@ -392,7 +457,7 @@ $('btn-new-game').addEventListener('click', () => {
   renderSetupColors();
   $('setup-life').value = state.startingLife;
   $('setup-deck').hidden = !$('setup-landless').checked;
-  $('dlg-setup').showModal();
+  openModal($('dlg-setup'));
 });
 
 $('setup-landless').addEventListener('change', () => {
@@ -455,12 +520,14 @@ function renderDeckPad() {
     row.innerHTML = `
       <span>${Decks.BASICS[item.c].name}</span>
       <span class="gy-side"><span class="via">${item.via}</span>
-      <button class="gy-get" title="Return to play (prints the land)">↩ 🖨</button></span>`;
+      <button class="gy-get" title="${settings.printLands ? 'Return to play (prints the land)' : 'Return to play'}">↩${settings.printLands ? ' 🖨' : ''}</button></span>`;
     row.querySelector('.gy-get').addEventListener('click', async () => {
       items.splice(index, 1);
       commit();
       renderDeckPad();
-      if (!settings.printLands && !Printing.isPrinterConnected()) {
+      // Honour the print-lands setting here too — otherwise returning a land
+      // prints it whenever a printer happens to be connected.
+      if (!settings.printLands) {
         toast(`${Decks.BASICS[item.c].name} returned from graveyard`);
         return;
       }
@@ -477,7 +544,7 @@ document.querySelectorAll('.deck-btn').forEach((btn) => {
     $('deck-flip').classList.toggle('flip', deckPlayer === 1);
     setDeckStage('deck');
     renderDeckPad();
-    $('dlg-deck').showModal();
+    openModal($('dlg-deck'));
   });
 });
 
@@ -545,7 +612,7 @@ async function drawMany(n) {
     summonFlip = deckPlayer === 1;
     flipWrap.classList.toggle('flip', summonFlip);
     setStage('card');
-    if (!$('dlg-summon').open) $('dlg-summon').showModal();
+    openModal($('dlg-summon'));
     $('card-reveal').innerHTML =
       `<p>Drew ${colors.length}:</p><p><b>${names.join('<br>')}</b></p>` +
       '<p class="sub">Connect the printer (⚙) to auto-print drawn lands.</p>';
@@ -563,7 +630,7 @@ async function drawMany(n) {
     summonFlip = deckPlayer === 1;
     flipWrap.classList.toggle('flip', summonFlip);
     setStage('card');
-    if (!$('dlg-summon').open) $('dlg-summon').showModal();
+    openModal($('dlg-summon'));
     $('card-reveal').innerHTML = `<p class="hint">Preparing ${colors.length} lands…</p>`;
     try {
       const width = await Printing.printerWidthDots(settings);
@@ -696,7 +763,7 @@ $('btn-settings').addEventListener('click', () => {
   $('no-bluetooth').hidden = Printing.isBluetoothAvailable();
   $('printer-block').hidden = !Printing.isBluetoothAvailable();
   syncPrinterPanel();
-  $('dlg-settings').showModal();
+  openModal($('dlg-settings'));
 });
 
 $('set-hide-counts').addEventListener('change', () => {

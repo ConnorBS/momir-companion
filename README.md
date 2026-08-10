@@ -42,7 +42,8 @@ once you start a game from the ⚙ menu.
   (selection uses Scryfall `oracle_cards` data, one entry per name). Once a
   name is chosen, the **art is a random printing from all of Magic history**.
 - **High-contrast B&W receipts** — the card prints with the real art box,
-  auto-leveled and Floyd–Steinberg dithered for thermal paper. No QR codes.
+  auto-leveled and dithered for thermal paper (Atkinson by default;
+  Floyd–Steinberg, ordered and threshold are in settings). No QR codes.
 - **Refresh-proof** — life totals and settings autosave to localStorage.
 
 ## Printing
@@ -68,8 +69,8 @@ card preview and share it to the official Phomemo app.
 
 ## Card data
 
-`scripts/build-index.mjs` downloads Scryfall's `oracle_cards` bulk file and
-filters it to Momir-legal creatures (filter rules ported from
+`scripts/build-index.mjs` streams Scryfall's `oracle_cards` bulk file (JSONL,
+one card per line) and filters it to Momir-legal creatures (filter rules ported from
 [momir-basic-printer](https://github.com/MoritzHayden/momir-basic-printer)
 by Hayden Moritz, MIT): excludes tokens/emblems/schemes/etc., funny and
 gold-border sets, Alchemy rebalances, and anything not available in paper.
@@ -93,6 +94,17 @@ Rebuild the card index manually with:
 
 ```sh
 node scripts/build-index.mjs
+```
+
+It refuses to shrink the committed index by more than 10% (that almost always
+means a truncated download or another Scryfall format change); pass `--force`
+if a drop is genuine.
+
+Run the self-test — land-deck maths, the Momir filter, and the bulk-data
+handling end to end against a local fake Scryfall — with:
+
+```sh
+node scripts/selftest.mjs
 ```
 
 ## Credits & legal
