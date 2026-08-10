@@ -21,7 +21,10 @@
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { realpathSync } from 'node:fs';
 import { join } from 'node:path';
+import { createInterface } from 'node:readline';
+import { Readable } from 'node:stream';
 import { fileURLToPath } from 'node:url';
+import { createGunzip } from 'node:zlib';
 
 // Overridable so the self-test can point the builder at a local fake Scryfall.
 const API = process.env.SCRYFALL_API || 'https://api.scryfall.com';
@@ -74,24 +77,37 @@ export function pickDownload(catalog) {
   );
 }
 
-/** Yield each non-empty line of a streamed response without buffering the body. */
+/**
+ * Yield each non-empty line of a streamed response without buffering the body.
+ *
+ * Scryfall serves the bulk files gzipped as *content* (the URI ends
+ * `.jsonl.gz`) rather than with `Content-Encoding: gzip`, so fetch correctly
+ * hands back the compressed bytes untouched. Sniff the gzip magic number on
+ * the first chunk instead of trusting the extension or the content type, so
+ * this keeps working either way.
+ */
 async function* streamLines(url) {
   const resp = await fetch(url, { headers: HEADERS });
   if (!resp.ok) throw new Error(`${url} -> HTTP ${resp.status}`);
   if (!resp.body) throw new Error(`${url} -> empty response body`);
-  const decoder = new TextDecoder();
-  let buffer = '';
-  for await (const chunk of resp.body) {
-    buffer += decoder.decode(chunk, { stream: true });
-    let newline;
-    while ((newline = buffer.indexOf('\n')) >= 0) {
-      const line = buffer.slice(0, newline).trim();
-      buffer = buffer.slice(newline + 1);
-      if (line) yield line;
-    }
+
+  const chunks = resp.body[Symbol.asyncIterator]();
+  const first = await chunks.next();
+  if (first.done) return;
+  const head = first.value;
+  const gzipped = head[0] === 0x1f && head[1] === 0x8b;
+
+  async function* replay() {
+    yield head;
+    for (let next = await chunks.next(); !next.done; next = await chunks.next()) yield next.value;
   }
-  buffer += decoder.decode();
-  if (buffer.trim()) yield buffer.trim();
+
+  let source = Readable.from(replay());
+  if (gzipped) source = source.pipe(createGunzip());
+  for await (const line of createInterface({ input: source, crlfDelay: Infinity })) {
+    const trimmed = line.trim();
+    if (trimmed) yield trimmed;
+  }
 }
 
 /** Iterate every card in the bulk file, whichever format Scryfall served. */

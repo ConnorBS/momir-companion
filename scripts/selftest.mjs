@@ -5,8 +5,9 @@
  * Covers the two pieces that can break silently:
  *  • the land-deck maths in js/decks.js (draw/mill/scry/shuffle are the game),
  *  • the Scryfall bulk-data handling in scripts/build-index.mjs — the weekly
- *    refresh broke in 2026 when Scryfall retired the JSON `download_uri`, so
- *    the builder is run end-to-end against a local fake Scryfall.
+ *    refresh broke in 2026 when Scryfall retired the JSON `download_uri` in
+ *    favour of a gzipped JSONL file, so the builder is run end-to-end against
+ *    a local fake Scryfall serving every shape it might see.
  *
  * The browser UI is not covered here (it needs a real DOM + canvas).
  */
@@ -19,6 +20,7 @@ import { join } from 'node:path';
 import { execFile } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
+import { gzipSync } from 'node:zlib';
 
 import * as Decks from '../js/decks.js';
 import { isValidMomirCard, bucketFor, pickDownload } from './build-index.mjs';
@@ -173,24 +175,35 @@ await test('pickDownload prefers JSONL and explains an unusable catalog', () => 
 
 // -------------------------------------------------- builder against a fake API
 
-/** Minimal stand-in for the Scryfall bulk-data endpoints. */
-function fakeScryfall({ format = 'jsonl', cards }) {
+/**
+ * Minimal stand-in for the Scryfall bulk-data endpoints.
+ * `format`: 'gzip' mirrors production (a .jsonl.gz served as content, with no
+ * Content-Encoding header), 'jsonl' is plain text, 'json' is the retired array.
+ */
+function fakeScryfall({ format = 'gzip', cards }) {
+  const jsonl = `${cards.map((c) => JSON.stringify(c)).join('\n')}\n`;
   const server = http.createServer((req, res) => {
     if (req.url.startsWith('/bulk-data/oracle_cards')) {
       const body = {
         object: 'bulk_data', type: 'oracle_cards', updated_at: '2026-08-10T00:00:00.000+00:00', size: 1234,
       };
       const base = `http://127.0.0.1:${server.address().port}`;
-      if (format === 'jsonl') body.jsonl_download_uri = `${base}/oracle.jsonl`;
+      if (format === 'gzip') body.jsonl_download_uri = `${base}/oracle.jsonl.gz`;
+      else if (format === 'jsonl') body.jsonl_download_uri = `${base}/oracle.jsonl`;
       else body.download_uri = `${base}/oracle.json`;
       res.writeHead(200, { 'content-type': 'application/json' });
       return res.end(JSON.stringify(body));
     }
+    if (req.url === '/oracle.jsonl.gz') {
+      // Deliberately NOT Content-Encoding: gzip — the gzip is the content, so
+      // fetch must not decompress it and the builder has to do so itself.
+      res.writeHead(200, { 'content-type': 'application/gzip' });
+      return res.end(gzipSync(Buffer.from(jsonl)));
+    }
     if (req.url === '/oracle.jsonl') {
       res.writeHead(200, { 'content-type': 'application/x-ndjson' });
       // Deliberately chunked mid-line to exercise the streaming line splitter.
-      const text = `${cards.map((c) => JSON.stringify(c)).join('\n')}\n`;
-      for (let i = 0; i < text.length; i += 7) res.write(text.slice(i, i + 7));
+      for (let i = 0; i < jsonl.length; i += 7) res.write(jsonl.slice(i, i + 7));
       return res.end();
     }
     if (req.url === '/oracle.json') {
@@ -224,7 +237,18 @@ const SAMPLE = [
   creature({ name: 'Arena Only', oracle_id: 'o-arena', games: ['arena'] }),
 ];
 
-await test('builder reads the current JSONL bulk format end to end', async () => {
+await test('builder reads the live format: gzipped JSONL served as content', async () => {
+  const { out, stdout, cleanup } = await buildWith(fakeScryfall({ format: 'gzip', cards: SAMPLE }));
+  try {
+    const meta = JSON.parse(await readFile(join(out, 'meta.json'), 'utf8'));
+    assert.equal(meta.total_creatures, 4, stdout);
+    assert.deepEqual(meta.counts, { 0: 1, 1: 1, 2: 1, 15: 1 });
+    const bucket = JSON.parse(await readFile(join(out, 'cmc', '15.json'), 'utf8'));
+    assert.deepEqual(bucket, [{ n: 'Autochthon Wurm', id: 'o-wurm' }]);
+  } finally { await cleanup(); }
+});
+
+await test('builder reads uncompressed JSONL too', async () => {
   const { out, stdout, cleanup } = await buildWith(fakeScryfall({ format: 'jsonl', cards: SAMPLE }));
   try {
     const meta = JSON.parse(await readFile(join(out, 'meta.json'), 'utf8'));
