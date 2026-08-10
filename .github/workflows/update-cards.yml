@@ -16,6 +16,8 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
+      - name: Self-test (fails fast if Scryfall's bulk format moved again)
+        run: node scripts/selftest.mjs
       - name: Rebuild index from Scryfall bulk data
         run: node scripts/build-index.mjs
       - name: Commit if changed

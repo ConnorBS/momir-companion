@@ -47,7 +47,10 @@ export async function connectPrinter() {
 }
 
 export async function disconnectPrinter() {
-  await BLETransport.getShared().disconnect();
+  stopKeepalive();
+  const transport = BLETransport.getShared();
+  await transport.disconnect();
+  transport.resetPrinterInfo(); // otherwise the panel shows the old battery/paper
 }
 
 export function isPrinterConnected() {
@@ -129,6 +132,11 @@ function fastTransport(transport) {
 // bytes would corrupt the raster stream.
 let keepaliveTimer = null;
 let printing = false;
+
+function stopKeepalive() {
+  clearInterval(keepaliveTimer);
+  keepaliveTimer = null;
+}
 
 function startKeepalive() {
   clearInterval(keepaliveTimer);

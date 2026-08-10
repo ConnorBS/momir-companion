@@ -27,6 +27,22 @@ function loadImage(url, retry = true) {
   });
 }
 
+/** Split a single word that is wider than the line into edge-safe chunks. */
+function breakWord(ctx, word, maxWidth) {
+  const chunks = [];
+  let chunk = '';
+  for (const char of word) {
+    if (chunk && ctx.measureText(chunk + char).width > maxWidth) {
+      chunks.push(chunk);
+      chunk = char;
+    } else {
+      chunk += char;
+    }
+  }
+  if (chunk) chunks.push(chunk);
+  return chunks;
+}
+
 function wrapText(ctx, text, maxWidth) {
   const lines = [];
   for (const paragraph of String(text).split('\n')) {
@@ -39,10 +55,32 @@ function wrapText(ctx, text, maxWidth) {
       } else {
         line = attempt;
       }
+      // A word that is wider than the whole line can never fit — break it
+      // mid-word rather than letting it run off the edge of the paper.
+      if (ctx.measureText(line).width > maxWidth) {
+        const chunks = breakWord(ctx, line, maxWidth);
+        line = chunks.pop();
+        lines.push(...chunks);
+      }
     }
     lines.push(line);
   }
   return lines;
+}
+
+/**
+ * Largest name font (down to a floor) whose longest word still fits the line.
+ * Card names run to 31 characters (Asmoranomardicadaistinaculdacar), which
+ * overruns a 57mm roll at the nominal size; shrinking reads far better than
+ * hyphenating a proper noun.
+ */
+function fitNameFont(ctx, name, maxWidth) {
+  const longest = String(name).split(' ').reduce((a, b) => (a.length > b.length ? a : b), '');
+  for (let size = 32; size > 22; size -= 2) {
+    ctx.font = `bold ${size}px Georgia, serif`;
+    if (ctx.measureText(longest).width <= maxWidth) break;
+  }
+  return ctx.font;
 }
 
 function drawLines(ctx, lines, x, y, lineHeight) {
@@ -78,7 +116,9 @@ export async function renderCard(card, widthDots, { showOracle = true, title = n
   // Measure pass on a throwaway context
   const measure = document.createElement('canvas').getContext('2d');
 
-  measure.font = 'bold 32px Georgia, serif';
+  const nameFont = fitNameFont(measure, card.name, contentW);
+  const nameSize = Number(nameFont.match(/(\d+)px/)?.[1] ?? 32);
+  const nameLineH = Math.round(nameSize * 1.125);
   const nameLines = wrapText(measure, card.name, contentW);
 
   measure.font = '24px Georgia, serif';
@@ -92,7 +132,7 @@ export async function renderCard(card, widthDots, { showOracle = true, title = n
 
   let height = PAD;
   if (title) height += 26;
-  height += nameLines.length * 36 + 4;
+  height += nameLines.length * nameLineH + 4;
   height += manaLine * 30;
   if (artImg) height += artH + 8;
   if (symbol) height += symbolH + 8;
@@ -118,8 +158,8 @@ export async function renderCard(card, widthDots, { showOracle = true, title = n
     y += 26;
   }
 
-  ctx.font = 'bold 32px Georgia, serif';
-  y = drawLines(ctx, nameLines, PAD, y, 36) + 4;
+  ctx.font = nameFont;
+  y = drawLines(ctx, nameLines, PAD, y, nameLineH) + 4;
 
   if (manaLine) {
     ctx.font = 'bold 24px Courier New, monospace';
